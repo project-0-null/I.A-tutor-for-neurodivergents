@@ -1,0 +1,27 @@
+# Ambiente Virtual
+tesla/
+venv/
+.venv/
+env/
+
+# Arquivos de Ambiente e Segredos
+.env
+.env.local
+.env.*.local
+
+# Python Cache e Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDEs e Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema Operacional
+.DS_Store
+Thumbs.db

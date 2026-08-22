@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tutor Educacional Acessível</title>
+  <meta name="description" content="Assistente educacional com foco em acessibilidade e conforto cognitivo.">
+
+  <!-- Fontes: Lexend (padrão, alta legibilidade) e Arial (fallback do sistema) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Link de pular navegação: primeiro elemento focável da página -->
+  <a class="skip-link" href="#campo-mensagem">Pular direto para o campo de pergunta</a>
+
+  <!-- Região usada só para avisos importantes ao leitor de tela (erros, status) -->
+  <div id="status-announcer" class="visually-hidden" role="status" aria-live="assertive" aria-atomic="true"></div>
+
+  <div class="app-shell">
+
+    <header class="app-header">
+      <div class="app-header__brand">
+        <span class="app-header__mark" aria-hidden="true"></span>
+        <div>
+          <p class="app-header__title">Tutor Educacional</p>
+          <p class="app-header__subtitle">Um espaço calmo para aprender no seu ritmo</p>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        id="btn-modo-simples"
+        class="switch-btn"
+        aria-pressed="false"
+      >
+        <span class="switch-btn__track" aria-hidden="true"><span class="switch-btn__thumb"></span></span>
+        <span class="switch-btn__label">Modo simples</span>
+      </button>
+    </header>
+
+    <div class="app-body">
+
+      <!-- Painel de Conforto: preferências visuais e cognitivas -->
+      <!-- <details> nativo garante colapso/expansão acessível sem JS extra -->
+      <details class="comfort-panel" id="painel-conforto" open>
+        <summary class="comfort-panel__summary">
+          Painel de conforto
+          <span class="comfort-panel__summary-hint">Ajuste a tela do seu jeito</span>
+        </summary>
+
+        <div class="comfort-panel__body">
+
+          <!-- Campo de Hiperfoco -->
+          <section class="comfort-block" aria-labelledby="titulo-hiperfoco">
+            <h2 id="titulo-hiperfoco" class="comfort-block__title">Seu interesse especial</h2>
+            <p class="comfort-block__help">
+              Opcional. Contamos exemplos usando esse tema sempre que possível.
+            </p>
+            <label for="campo-hiperfoco" class="field-label">Tema de interesse</label>
+            <input
+              type="text"
+              id="campo-hiperfoco"
+              name="hiperfoco"
+              class="text-input"
+              placeholder="ex.: dinossauros, trens, astronomia..."
+              autocomplete="off"
+            >
+          </section>
+
+          <!-- Fontes inclusivas -->
+          <section class="comfort-block" aria-labelledby="titulo-fonte">
+            <h2 id="titulo-fonte" class="comfort-block__title">Fonte de leitura</h2>
+            <div class="option-group" role="group" aria-label="Escolher fonte do texto">
+              <button type="button" class="option-btn" data-font="lexend" aria-pressed="true">Lexend</button>
+              <button type="button" class="option-btn" data-font="arial" aria-pressed="false">Arial</button>
+              <button type="button" class="option-btn" data-font="dyslexic" aria-pressed="false">OpenDyslexic</button>
+            </div>
+          </section>
+
+          <!-- Tamanho do texto -->
+          <section class="comfort-block" aria-labelledby="titulo-tamanho">
+            <h2 id="titulo-tamanho" class="comfort-block__title">Tamanho do texto</h2>
+            <div class="size-control" role="group" aria-label="Ajustar tamanho do texto">
+              <button type="button" id="btn-size-dec" class="icon-btn" aria-label="Diminuir tamanho do texto">A−</button>
+              <span id="size-label" class="size-control__value" aria-live="polite">100%</span>
+              <button type="button" id="btn-size-inc" class="icon-btn" aria-label="Aumentar tamanho do texto">A+</button>
+            </div>
+          </section>
+
+          <!-- Toggles de conforto visual -->
+          <section class="comfort-block" aria-labelledby="titulo-visual">
+            <h2 id="titulo-visual" class="comfort-block__title">Conforto visual</h2>
+
+            <label class="toggle-row">
+              <input type="checkbox" id="chk-espacamento">
+              <span>Espaçamento ampliado entre letras e linhas</span>
+            </label>
+
+            <label class="toggle-row">
+              <input type="checkbox" id="chk-reduzir-cores">
+              <span>Reduzir cores e estímulos visuais</span>
+            </label>
+
+            <label class="toggle-row">
+              <input type="checkbox" id="chk-contraste">
+              <span>Alto contraste (preto e branco)</span>
+            </label>
+          </section>
+
+          <!-- Nível de energia / cansaço cognitivo -->
+          <section class="comfort-block" aria-labelledby="titulo-energia">
+            <h2 id="titulo-energia" class="comfort-block__title">Como está sua energia agora?</h2>
+            <div class="energy-gauge" role="group" aria-label="Selecionar nível de energia atual">
+              <button type="button" class="energy-gauge__seg" data-level="alta" data-step="1" aria-pressed="false">
+                Alta
+              </button>
+              <button type="button" class="energy-gauge__seg" data-level="media" data-step="2" aria-pressed="false">
+                Média
+              </button>
+              <button type="button" class="energy-gauge__seg" data-level="baixa" data-step="3" aria-pressed="false">
+                Baixa
+              </button>
+              <button type="button" class="energy-gauge__seg" data-level="sobrecarregada" data-step="4" aria-pressed="false">
+                Sobrecarregado(a)
+              </button>
+            </div>
+
+            <button type="button" id="btn-simplificar-agora" class="action-btn">
+              Simplificar agora
+            </button>
+            <p class="comfort-block__help">
+              Deixa tudo maior, mais espaçado e com menos cor em um clique.
+            </p>
+          </section>
+
+        </div>
+      </details>
+
+      <!-- Área principal: conversa com o tutor -->
+      <main class="chat-panel">
+
+        <section class="chat-log-wrapper" aria-label="Conversa com o tutor">
+          <div id="chat-log" class="chat-log" role="log" aria-live="polite" aria-atomic="false">
+            <div class="message message--tutor">
+              <p class="message__author">Tutor</p>
+              <div class="message__bubble">
+                <p>Oi! Sou seu tutor. Pode me perguntar o que quiser, no seu ritmo. Não tem pressa por aqui.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Ações rápidas de pergunta -->
+        <div class="quick-prompts" role="group" aria-label="Perguntas rápidas">
+          <button type="button" class="chip-btn" data-prompt="simplificar">Simplifique a explicação</button>
+          <button type="button" class="chip-btn" data-prompt="exemplo">Dê um exemplo prático</button>
+          <button type="button" class="chip-btn" data-prompt="resumo">Resuma em tópicos</button>
+          <button type="button" class="chip-btn" data-prompt="passo-a-passo">Explique passo a passo</button>
+        </div>
+
+        <!-- Entrada de texto -->
+        <form id="chat-form" class="chat-form">
+          <label for="campo-mensagem" class="field-label">Sua pergunta</label>
+          <div class="chat-form__row">
+            <textarea
+              id="campo-mensagem"
+              class="text-input text-input--area"
+              rows="1"
+              placeholder="Digite sua pergunta aqui..."
+              required
+            ></textarea>
+            <button type="submit" id="btn-enviar" class="send-btn">
+              <span>Enviar</span>
+            </button>
+          </div>
+          <p class="chat-form__hint">Enter envia · Shift + Enter quebra a linha</p>
+        </form>
+
+      </main>
+    </div>
+
+    <footer class="app-footer">
+      <p>As respostas são geradas por um assistente e podem conter erros. Confirme informações importantes com seu professor.</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

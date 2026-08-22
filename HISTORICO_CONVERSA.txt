@@ -1,0 +1,268 @@
+================================================================================
+                    HISTÓRICO COMPLETO DA CONVERSA E GUIA DO PROJETO
+                   TUTOR EDUCACIONAL INCLUSIVO COM FASTAPI & GEMINI
+================================================================================
+
+Data de registro: 2026-08-21
+Objetivo: API intermediária em FastAPI + Google Gemini para alunos neurodivergentes e conexão com Front-end.
+
+--------------------------------------------------------------------------------
+1. RESUMO DOS REQUISITOS ATENDIDOS
+--------------------------------------------------------------------------------
+1. Configuração Base e Segurança:
+   - Framework FastAPI com servidor ASGI Uvicorn.
+   - Integração com o SDK `google-generativeai` e biblioteca `python-dotenv`.
+   - Proteção estrita da chave de API (`GEMINI_API_KEY`) via arquivo `.env`.
+
+2. Integração com Modelo e System Prompt:
+   - Injeção de `system_instruction` no `genai.GenerativeModel`.
+   - Instruções de hiperfoco, paciência, baixa verbosidade e comunicação literal sem ambiguidades.
+   - Formato de saída estrito: exatamente 2 parágrafos curtos + 3 bullet points no resumo final.
+   - Temperatura baixa (0.1) para determinismo e fidelidade às regras.
+
+3. Desafios Técnicos e Regras da API:
+   - Histórico de Conversa: Estruturado no Pydantic (`history`), mantendo contexto sem estourar limite de tokens.
+   - Variáveis Dinâmicas (Hiperfoco): Validação e sanitização. Se ausente/vazio, não injeta lixo no prompt.
+   - Rate Limiting: Interceptação de `ResourceExhausted` (429) com retorno amigável:
+     "Nosso tutor está processando muitas dúvidas agora, tente novamente em um minuto!".
+
+--------------------------------------------------------------------------------
+2. ARQUIVOS CRIADOS NO PROJETO
+--------------------------------------------------------------------------------
+
+- requirements.txt : Dependências Python do projeto.
+- .env.example     : Exemplo das variáveis de ambiente necessárias.
+- .env             : Onde fica a sua chave secreta da API do Gemini.
+- main.py          : Código completo da API FastAPI, endpoints, Pydantic e Gemini.
+- index.html       : Front-end completo, visual, estilizado e conectado à API.
+- dockerfile & docker-compose.yaml : Para deploy em container Docker.
+
+--------------------------------------------------------------------------------
+3. CÓDIGO DO BACK-END (main.py)
+--------------------------------------------------------------------------------
+
+```python
+import os
+import logging
+from typing import List, Optional
+from enum import Enum
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted, GoogleAPICallError
+
+# 1. Configuração de Ambiente e Logging
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - [%(levelname)s] - %(name)s - %(message)s"
+)
+logger = logging.getLogger("api-tutor-neurodivergente")
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    logger.critical("A variável GEMINI_API_KEY não foi encontrada no ambiente!")
+    raise RuntimeError(
+        "Configuração ausente: Crie o arquivo .env e defina a variável GEMINI_API_KEY."
+    )
+
+genai.configure(api_key=GEMINI_API_KEY)
+
+# 2. Configuração do Modelo e System Prompt
+SYSTEM_INSTRUCTION = """
+Você é um tutor educacional especializado no atendimento a estudantes neurodivergentes.
+Suas diretrizes de comunicação são fundamentais e devem ser seguidas com rigor absoluto:
+
+1. Comunicação Literal e Objetiva: Utilize linguagem clara, direta, concreta e sem ambiguidades. Evite sarcasmo, ironia, expressões de duplo sentido, metáforas complexas e figuras de linguagem.
+2. Tom de Voz: Seja acolhedor, altamente paciente e mantenha baixa verbosidade (vá direto ao ponto sem enrolação).
+3. Adaptação a Hiperfoco: Se um tema de hiperfoco for informado no contexto da mensagem, use analogias e exemplos estritamente ligados a esse tema para facilitar o aprendizado. Se não for informado, explique de forma simples e direta.
+4. ESTRUTURA DE RESPOSTA OBRIGATÓRIA:
+   - Toda resposta deve ser composta inicialmente por EXATAMENTE DOIS (2) PARÁGRAFOS CURTOS com a explicação conceitual.
+   - Imediatamente após os dois parágrafos, inclua um resumo final contendo EXATAMENTE TRÊS (3) BULLET POINTS (utilizando '-') destacando os pontos principais.
+"""
+
+GENERATION_CONFIG = genai.types.GenerationConfig(
+    temperature=0.1,
+    top_p=0.95,
+    top_k=40,
+)
+
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
+model = genai.GenerativeModel(
+    model_name=MODEL_NAME,
+    system_instruction=SYSTEM_INSTRUCTION,
+    generation_config=GENERATION_CONFIG
+)
+
+# 3. Inicialização do FastAPI e Middlewares
+app = FastAPI(
+    title="API Tutor Educacional Inclusivo",
+    description="Backend intermediário com Google Gemini para suporte a alunos neurodivergentes.",
+    version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 4. Esquemas de Dados (Pydantic Models)
+class RoleEnum(str, Enum):
+    USER = "user"
+    MODEL = "model"
+
+class ChatMessage(BaseModel):
+    role: RoleEnum = Field(..., description="Papel do remetente: 'user' ou 'model'")
+    content: str = Field(..., min_length=1, description="Texto da mensagem")
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, description="Dúvida ou pergunta atual do estudante.")
+    hiperfoco: Optional[str] = Field(
+        default=None,
+        description="Tema de interesse/hiperfoco do aluno."
+    )
+    history: Optional[List[ChatMessage]] = Field(
+        default_factory=list,
+        description="Histórico das últimas interações para preservar contexto."
+    )
+
+class ChatResponse(BaseModel):
+    response: str = Field(..., description="Resposta pedagógica gerada pelo Gemini.")
+    status: str = Field(default="success", description="Status da resposta.")
+
+class HealthResponse(BaseModel):
+    status: str
+    model: str
+
+# 5. Endpoints
+@app.get("/api/health", response_model=HealthResponse, tags=["Monitoramento"])
+async def health_check():
+    return HealthResponse(status="healthy", model=MODEL_NAME)
+
+@app.post("/api/chat", response_model=ChatResponse, status_code=status.HTTP_200_OK, tags=["Tutor"])
+async def chat_endpoint(payload: ChatRequest):
+    try:
+        # Tratamento de hiperfoco
+        cleaned_hiperfoco = payload.hiperfoco.strip() if payload.hiperfoco else None
+        if cleaned_hiperfoco:
+            user_content = (
+                f"[Contexto de Hiperfoco do Aluno: {cleaned_hiperfoco}]\n\n"
+                f"Pergunta do aluno: {payload.message.strip()}"
+            )
+        else:
+            user_content = payload.message.strip()
+
+        # Histórico (últimas 6 mensagens)
+        MAX_HISTORY_ITEMS = 6
+        recent_history = payload.history[-MAX_HISTORY_ITEMS:] if payload.history else []
+
+        gemini_contents = []
+        for msg in recent_history:
+            gemini_contents.append({
+                "role": "user" if msg.role == RoleEnum.USER else "model",
+                "parts": [msg.content]
+            })
+
+        gemini_contents.append({
+            "role": "user",
+            "parts": [user_content]
+        })
+
+        logger.info(
+            f"Processando requisição. Histórico: {len(recent_history)} msgs | "
+            f"Hiperfoco: {'Sim (' + cleaned_hiperfoco + ')' if cleaned_hiperfoco else 'Não informado'}"
+        )
+
+        gemini_response = model.generate_content(gemini_contents)
+
+        if not gemini_response.text:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="O tutor não conseguiu gerar uma resposta adequada."
+            )
+
+        return ChatResponse(
+            response=gemini_response.text,
+            status="success"
+        )
+
+    except ResourceExhausted as e:
+        logger.warning(f"Rate limit do Gemini atingido: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Nosso tutor está processando muitas dúvidas agora, tente novamente em um minuto!"
+        )
+    except GoogleAPICallError as e:
+        logger.error(f"Erro na API do Gemini: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Ocorreu uma falha de comunicação com o serviço de inteligência artificial."
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro interno: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Ocorreu um erro interno no servidor ao processar a resposta."
+        )
+
+# 6. Inicialização do Servidor
+if __name__ == "__main__":
+    import uvicorn
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", 8000))
+    logger.info(f"Iniciando API em http://{host}:{port}")
+    uvicorn.run("main:app", host=host, port=port, reload=True)
+```
+
+--------------------------------------------------------------------------------
+4. EXPLICAÇÃO DO SERVIDOR, ENDPOINTS E FRONT-END
+--------------------------------------------------------------------------------
+
+A. O QUE É O SERVIDOR?
+- Uvicorn: Servidor assíncrono (ASGI) que escuta a porta 8000 na rede e recebe chamadas HTTP.
+- FastAPI: O framework que recebe os dados do Uvicorn, valida o JSON via Pydantic e executa a lógica em Python.
+- CORS (Cross-Origin Resource Sharing): Middleware que autoriza o Front-end a fazer requisições para a API sem ser bloqueado pela segurança do navegador.
+
+B. O QUE SÃO OS ENDPOINTS?
+- GET /api/health : Verifica se o servidor está no ar e qual modelo está ativo.
+- POST /api/chat : Rota principal onde o Front envia a mensagem, o hiperfoco e o histórico de mensagens, recebendo a resposta formatada da IA.
+
+C. COMO FUNCIONA O FRONT-END? (HTML, CSS e JavaScript):
+- HTML (Estrutura): Cria os botões, campos de texto e a caixa de mensagens.
+- CSS (Aparência): Aplica as cores, fontes, bordas e espaçamentos visualmente acessíveis.
+- JavaScript (Comportamento):
+  1. Captura o que o usuário digitou no campo de texto.
+  2. Executa a função `fetch('http://localhost:8000/api/chat', ...)` enviando o JSON.
+  3. Recebe a resposta do FastAPI e desenha na tela os parágrafos e bullet points.
+  4. Mantém um array local (`historico = []`) com a conversa recente.
+
+--------------------------------------------------------------------------------
+5. COMO RODAR O PROJETO DO ZERO
+--------------------------------------------------------------------------------
+
+1. Instalar dependências:
+   pip install -r requirements.txt
+
+2. Configurar a chave no arquivo .env:
+   GEMINI_API_KEY=AIzaSy...sua_chave...
+
+3. Iniciar o servidor Backend:
+   python main.py
+   (Ou: uvicorn main:app --reload --host 0.0.0.0 --port 8000)
+
+4. Abrir o Front-end:
+   Basta dar dois cliques no arquivo `index.html` ou abrir no seu navegador!
+
+5. Documentação interativa da API (Swagger):
+   http://localhost:8000/docs
+================================================================================
