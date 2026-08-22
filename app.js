@@ -40,6 +40,7 @@
     btnSizeDec: document.getElementById('btn-size-dec'),
     sizeLabel: document.getElementById('size-label'),
 
+    chkModoEscuro: document.getElementById('chk-modo-escuro'),
     chkEspacamento: document.getElementById('chk-espacamento'),
     chkReduzirCores: document.getElementById('chk-reduzir-cores'),
     chkContraste: document.getElementById('chk-contraste'),
@@ -64,6 +65,7 @@
 
   /** Preferências de acessibilidade, persistidas em localStorage entre sessões. */
   let prefs = {
+    darkMode: false,
     font: 'lexend',
     fontScaleIndex: 1, // aponta para FONT_SCALE_STEPS -> 1.0
     spacing: false,
@@ -74,16 +76,47 @@
     hiperfoco: '',
   };
 
+  /** Indica se o usuário já escolheu manualmente claro/escuro alguma vez. */
+  let darkModeIsExplicit = false;
+
+  function systemPrefersDark() {
+    return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+
   function loadPrefs() {
+    let saved = null;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        prefs = Object.assign(prefs, JSON.parse(raw));
-      }
+      if (raw) saved = JSON.parse(raw);
     } catch (err) {
       // localStorage indisponível (ex.: navegação privada). Segue com padrões.
       console.warn('Não foi possível carregar preferências salvas:', err);
     }
+
+    if (saved && typeof saved === 'object') {
+      prefs = Object.assign(prefs, saved);
+    }
+
+    // Só usamos o tema claro/escuro do sistema operacional se o usuário
+    // nunca tiver escolhido manualmente nesse navegador.
+    darkModeIsExplicit = Boolean(saved && Object.prototype.hasOwnProperty.call(saved, 'darkMode'));
+    if (!darkModeIsExplicit) {
+      prefs.darkMode = systemPrefersDark();
+    }
+  }
+
+  /** Acompanha o SO em tempo real enquanto o usuário não fizer uma escolha manual. */
+  function watchSystemColorScheme() {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (event) => {
+      if (darkModeIsExplicit) return; // usuário já decidiu; não sobrescrevemos
+      prefs.darkMode = event.matches;
+      applyPrefs();
+    };
+    // addEventListener é o padrão atual; addListener é fallback para navegadores antigos
+    if (mq.addEventListener) mq.addEventListener('change', handler);
+    else if (mq.addListener) mq.addListener(handler);
   }
 
   function savePrefs() {
@@ -98,6 +131,10 @@
    * Aplicação das preferências na interface
    * ---------------------------------------------------------------------- */
   function applyPrefs() {
+    // Modo escuro
+    dom.html.classList.toggle('dark-mode', prefs.darkMode);
+    dom.chkModoEscuro.checked = prefs.darkMode;
+
     // Fonte
     dom.html.style.setProperty('--font-active', FONT_STACKS[prefs.font] || FONT_STACKS.lexend);
     dom.fontButtons.forEach((btn) => {
@@ -158,6 +195,14 @@
       prefs.fontScaleIndex = Math.max(prefs.fontScaleIndex - 1, 0);
       savePrefs();
       applyPrefs();
+    });
+
+    dom.chkModoEscuro.addEventListener('change', () => {
+      prefs.darkMode = dom.chkModoEscuro.checked;
+      darkModeIsExplicit = true;
+      savePrefs();
+      applyPrefs();
+      announce(prefs.darkMode ? 'Modo escuro ativado.' : 'Modo escuro desativado.');
     });
 
     dom.chkEspacamento.addEventListener('change', () => {
@@ -558,6 +603,7 @@
   function init() {
     loadPrefs();
     applyPrefs();
+    watchSystemColorScheme();
     initPreferenceControls();
     initChatForm();
   }

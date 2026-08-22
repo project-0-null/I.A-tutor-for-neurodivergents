@@ -54,6 +54,7 @@
   --color-danger-border: #E3B79E;
 
   --color-focus-ring: #1E4B42;
+  --color-on-primary: #FFFFFF; /* cor do texto sobre fundos de acento (botões, chips ativos) */
 
   /* Níveis de energia — cores discretas, não neon */
   --energy-alta: #2A6357;
@@ -120,6 +121,70 @@ html.reduce-color {
 }
 
 /* --------------------------------------------------------------------------
+   Modo escuro
+   Não é um simples "inverter cores": usa preto suave (nunca #000 puro) e
+   texto quase-branco para reduzir o brilho/halo que incomoda muita gente
+   com fotossensibilidade ou astigmatismo. O acento continua o mesmo verde
+   calmo, só mais claro para manter contraste sobre o fundo escuro.
+   -------------------------------------------------------------------------- */
+html.dark-mode {
+  --color-bg: #171D1B;
+  --color-surface: #1F2723;
+  --color-surface-alt: #26302B;
+  --color-border: #37443E;
+
+  --color-text: #E7EDE9;
+  --color-text-muted: #9FB0A8;
+
+  --color-primary: #6FBFA8;
+  --color-primary-dark: #4E9985;
+  --color-primary-soft: #223730;
+
+  --color-secondary: #B9AEE0;
+  --color-secondary-soft: #2A2740;
+
+  --color-warning-bg: #3A3116;
+  --color-warning-text: #EAC985;
+  --color-warning-border: #6B5629;
+
+  --color-danger-bg: #3A241C;
+  --color-danger-text: #E3B79E;
+  --color-danger-border: #6B4530;
+
+  --color-focus-ring: #8FD9C4;
+  --color-on-primary: #10231D; /* texto escuro sobre os acentos claros do tema escuro */
+
+  --energy-alta: #6FBFA8;
+  --energy-media: #8FCB9E;
+  --energy-baixa: #7FB0DE;
+  --energy-sobrecarregada: #B9AEE0;
+}
+
+/* Reduzir cores dentro do modo escuro: cinza mais claro para continuar visível */
+html.dark-mode.reduce-color {
+  --color-secondary: #9AA39F;
+  --color-secondary-soft: #2A2E2C;
+  --energy-alta: #9AA39F;
+  --energy-media: #9AA39F;
+  --energy-baixa: #9AA39F;
+  --energy-sobrecarregada: #9AA39F;
+}
+
+/* Alto contraste dentro do modo escuro: preto/branco reais, contraste máximo */
+html.dark-mode.high-contrast {
+  --color-bg: #000000;
+  --color-surface: #000000;
+  --color-surface-alt: #101010;
+  --color-border: #FFFFFF;
+  --color-text: #FFFFFF;
+  --color-text-muted: #E0E0E0;
+  --color-primary: #7FE0C4;
+  --color-primary-dark: #4E9985;
+  --color-primary-soft: #10231D;
+  --color-on-primary: #000000;
+}
+
+/* --------------------------------------------------------------------------
    Reset básico
    -------------------------------------------------------------------------- */
 *, *::before, *::after { box-sizing: border-box; }
@@ -148,6 +213,7 @@ body {
   letter-spacing: var(--letter-spacing-base);
   word-spacing: var(--word-spacing-base);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 200ms ease, color 200ms ease;
 }
 
 h1, h2, h3, p { margin: 0; }
@@ -359,7 +425,7 @@ summary:focus-visible {
 .option-btn[aria-pressed="true"] {
   background: var(--color-primary);
   border-color: var(--color-primary);
-  color: #FFFFFF;
+  color: var(--color-on-primary);
 }
 
 /* Controle de tamanho de texto */
@@ -421,16 +487,16 @@ summary:focus-visible {
   transition: background var(--transition-base), border-color var(--transition-base), transform var(--transition-base);
 }
 .energy-gauge__seg:hover { transform: translateY(-1px); }
-.energy-gauge__seg[data-level="alta"][aria-pressed="true"] { background: var(--energy-alta); border-color: var(--energy-alta); color: #fff; }
-.energy-gauge__seg[data-level="media"][aria-pressed="true"] { background: var(--energy-media); border-color: var(--energy-media); color: #fff; }
-.energy-gauge__seg[data-level="baixa"][aria-pressed="true"] { background: var(--energy-baixa); border-color: var(--energy-baixa); color: #fff; }
-.energy-gauge__seg[data-level="sobrecarregada"][aria-pressed="true"] { background: var(--energy-sobrecarregada); border-color: var(--energy-sobrecarregada); color: #fff; }
+.energy-gauge__seg[data-level="alta"][aria-pressed="true"] { background: var(--energy-alta); border-color: var(--energy-alta); color: var(--color-on-primary); }
+.energy-gauge__seg[data-level="media"][aria-pressed="true"] { background: var(--energy-media); border-color: var(--energy-media); color: var(--color-on-primary); }
+.energy-gauge__seg[data-level="baixa"][aria-pressed="true"] { background: var(--energy-baixa); border-color: var(--energy-baixa); color: var(--color-on-primary); }
+.energy-gauge__seg[data-level="sobrecarregada"][aria-pressed="true"] { background: var(--energy-sobrecarregada); border-color: var(--energy-sobrecarregada); color: var(--color-on-primary); }
 
 .action-btn {
   width: 100%;
   border: none;
   background: var(--color-secondary);
-  color: #FFFFFF;
+  color: var(--color-on-primary);
   padding: 0.6rem 1rem;
   border-radius: var(--radius-md);
   font-weight: 600;
@@ -605,7 +671,7 @@ summary:focus-visible {
 .send-btn {
   border: none;
   background: var(--color-primary);
-  color: #FFFFFF;
+  color: var(--color-on-primary);
   padding: 0.7rem 1.3rem;
   border-radius: var(--radius-md);
   font-weight: 600;
