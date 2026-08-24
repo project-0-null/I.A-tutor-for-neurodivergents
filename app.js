@@ -274,8 +274,9 @@
   }
 
   /* ------------------------------------------------------------------------
-   * Formatação de texto (markdown leve e seguro)
-   * Suporta: **negrito**, listas com "- " / "* " e listas numeradas "1. "
+   * Formatação de texto (markdown leve, código e fórmulas LaTeX)
+   * Suporta: **negrito**, `código`, blocos de código ```, listas com "- " / "* ",
+   * listas numeradas "1. " e expressões matemáticas LaTeX ($...$, $$...$$, \[...\], \begin{...}).
    * O texto é sempre escapado primeiro para evitar HTML malicioso vindo da API.
    * ---------------------------------------------------------------------- */
   function escapeHtml(text) {
@@ -289,13 +290,35 @@
       // `código inline` -> <code>código inline</code>
       .replace(/`([^`]+)`/g, '<code>$1</code>')
       // **negrito** -> <strong>negrito</strong> (já escapado, seguro para inserir)
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      // *itálico* -> <em>itálico</em>
-      .replace(/(^|[^*])\*([^*]+)\*([^*]|$)/g, '$1<em>$2</em>$3');
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   }
 
   function formatMessageToHtml(rawText) {
-    const lines = String(rawText).replace(/\r\n/g, '\n').split('\n');
+    // 1. Extrai blocos de código com cercas (```...```) para preservar indentação e quebras
+    const codeBlocks = [];
+    let workingText = String(rawText).replace(/```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)```/g, (_, lang, code) => {
+      codeBlocks.push({ lang, code });
+      return `@@CODEBLOCK${codeBlocks.length - 1}@@`;
+    });
+
+    // 2. Extrai fórmulas matemáticas em bloco ($$...$$, \[...\], \begin{...}...\end{...}).
+    // Extraímos elas ANTES de dividir o texto em parágrafos por linha para que os delimitadores
+    // de abertura e fechamento não fiquem em parágrafos <p> diferentes.
+    const mathBlocks = [];
+    workingText = workingText.replace(/\$\$[\s\S]+?\$\$/g, (match) => {
+      mathBlocks.push(match);
+      return `@@MATHBLOCK${mathBlocks.length - 1}@@`;
+    });
+    workingText = workingText.replace(/\\\[[\s\S]+?\\\]/g, (match) => {
+      mathBlocks.push(match);
+      return `@@MATHBLOCK${mathBlocks.length - 1}@@`;
+    });
+    workingText = workingText.replace(/\\begin\{([a-zA-Z]+\*?)\}[\s\S]+?\\end\{\1\}/g, (match) => {
+      mathBlocks.push(match);
+      return `@@MATHBLOCK${mathBlocks.length - 1}@@`;
+    });
+
+    const lines = workingText.replace(/\r\n/g, '\n').split('\n');
     const htmlParts = [];
 
     let listBuffer = [];
@@ -314,6 +337,14 @@
 
       if (trimmed === '') {
         flushList();
+        return;
+      }
+
+      // Bloco de código isolado
+      const codeMatch = /^@@CODEBLOCK(\d+)@@$/.exec(trimmed);
+      if (codeMatch) {
+        flushList();
+        htmlParts.push(trimmed);
         return;
       }
 
@@ -339,7 +370,54 @@
     });
 
     flushList();
-    return htmlParts.join('') || `<p>${escapeHtml(String(rawText))}</p>`;
+    let resultHtml = htmlParts.join('') || `<p>${escapeHtml(String(rawText))}</p>`;
+
+    // Restaura blocos de código
+    resultHtml = resultHtml.replace(/@@CODEBLOCK(\d+)@@/g, (_, idx) => {
+      const block = codeBlocks[Number(idx)];
+      return `<pre><code>${escapeHtml(block.code.trim())}</code></pre>`;
+    });
+
+    // Restaura os blocos de fórmula como texto puro e seguro (já escapado);
+    // quem interpreta a sintaxe LaTeX é o KaTeX, chamado depois de inserir o HTML no DOM.
+    resultHtml = resultHtml.replace(/@@MATHBLOCK(\d+)@@/g, (_, idx) => escapeHtml(mathBlocks[Number(idx)]));
+
+    return resultHtml;
+  }
+
+  /* ------------------------------------------------------------------------
+   * Renderização de fórmulas LaTeX (KaTeX)
+   * Roda depois que o HTML já está inserido no DOM: o KaTeX varre os nós de
+   * texto da bolha procurando pelos delimitadores abaixo e substitui cada
+   * trecho encontrado pela fórmula tipografada, sem alterar o resto do texto.
+   * ---------------------------------------------------------------------- */
+  const MATH_DELIMITERS = [
+    { left: '$$', right: '$$', display: true },
+    { left: '\\[', right: '\\]', display: true },
+    { left: '\\(', right: '\\)', display: false },
+    { left: '$', right: '$', display: false },
+    { left: '\\begin{equation}', right: '\\end{equation}', display: true },
+    { left: '\\begin{align}', right: '\\end{align}', display: true },
+    { left: '\\begin{align*}', right: '\\end{align*}', display: true },
+    { left: '\\begin{alignat}', right: '\\end{alignat}', display: true },
+    { left: '\\begin{gather}', right: '\\end{gather}', display: true },
+    { left: '\\begin{matrix}', right: '\\end{matrix}', display: true },
+    { left: '\\begin{pmatrix}', right: '\\end{pmatrix}', display: true },
+    { left: '\\begin{bmatrix}', right: '\\end{bmatrix}', display: true },
+    { left: '\\begin{cases}', right: '\\end{cases}', display: true },
+  ];
+
+  function renderMathIn(element) {
+    if (!element || typeof window.renderMathInElement !== 'function') return; // KaTeX ainda não carregou (ex.: sem internet)
+    try {
+      window.renderMathInElement(element, {
+        delimiters: MATH_DELIMITERS,
+        throwOnError: false, // fórmula malformada vira um aviso discreto, não quebra a página
+        ignoredTags: ['script', 'noscript', 'style', 'textarea'],
+      });
+    } catch (err) {
+      console.warn('Não foi possível renderizar uma fórmula LaTeX:', err);
+    }
   }
 
   /* ------------------------------------------------------------------------
@@ -360,6 +438,7 @@
     const bubble = document.createElement('div');
     bubble.className = 'message__bubble';
     bubble.innerHTML = html;
+    renderMathIn(bubble);
 
     wrapper.appendChild(author);
     wrapper.appendChild(bubble);
@@ -616,6 +695,7 @@
     watchSystemColorScheme();
     initPreferenceControls();
     initChatForm();
+    renderMathIn(dom.chatLog);
   }
 
   document.addEventListener('DOMContentLoaded', init);

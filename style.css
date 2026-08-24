@@ -597,9 +597,46 @@ summary:focus-visible {
   border-radius: 4px;
   font-size: 0.88em;
 }
+.message__bubble pre {
+  margin: 0.5rem 0;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+.message__bubble pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.85em;
+  display: block;
+}
+
+/* KaTeX: mantém a mesma linguagem visual calma e acessível do app */
+.message__bubble .katex-display {
+  margin: 0.5rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.15rem;
+}
+.message__bubble .katex {
+  font-size: 1.05em;
+}
+.message__bubble .katex-error {
+  color: var(--color-warning-text);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+  font-size: 0.9em;
+}
+
 html.dark-mode .message__bubble strong { color: var(--color-primary); }
 html.dark-mode .message__bubble code { background: rgba(255, 255, 255, 0.12); }
+html.dark-mode .message__bubble pre { background: rgba(0, 0, 0, 0.35); }
+html.dark-mode .message__bubble pre code { background: transparent; }
 html.high-contrast .message__bubble code { border: 1px solid var(--color-border); }
+html.high-contrast .message__bubble pre { border: 1px solid var(--color-border); }
 
 .message--user .message__bubble {
   background: var(--color-primary-soft);
