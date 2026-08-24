@@ -1,0 +1,14 @@
+.env
+.env.*
+.git
+.gitignore
+tesla/
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+HISTORICO_CONVERSA.txt

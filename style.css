@@ -221,6 +221,7 @@ h1, h2, h3, p { margin: 0; }
 button {
   font-family: inherit;
   font-size: inherit;
+  color: inherit; /* sem isso, o navegador usa uma cor própria de botão e ignora o tema (claro/escuro) */
   cursor: pointer;
 }
 
@@ -296,11 +297,12 @@ summary:focus-visible {
 }
 
 .app-header__mark {
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 2.5rem;
+  height: 2.5rem;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  object-fit: cover;
   flex-shrink: 0;
+  box-shadow: var(--shadow-soft);
 }
 
 .app-header__title {
@@ -526,8 +528,10 @@ summary:focus-visible {
 
 .chat-log {
   flex: 1;
+  min-width: 0; /* permite encolher dentro do container flex, sem estourar a largura */
   max-height: 55vh;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
@@ -536,6 +540,7 @@ summary:focus-visible {
 
 .message {
   max-width: 78%;
+  min-width: 0; /* evita que texto longo sem espaços force a caixa a crescer na horizontal */
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -570,6 +575,8 @@ summary:focus-visible {
 .message__bubble {
   border-radius: var(--radius-lg);
   padding: 0.75rem 1rem;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .message__bubble p { margin: 0 0 0.5rem; }
 .message__bubble p:last-child { margin-bottom: 0; }
@@ -582,6 +589,17 @@ summary:focus-visible {
 .message__bubble li { margin-bottom: 0.3rem; }
 .message__bubble li::marker { color: var(--color-primary); font-weight: 700; }
 .message__bubble strong { color: var(--color-primary-dark); font-weight: 700; }
+.message__bubble em { font-style: italic; color: inherit; }
+.message__bubble code {
+  font-family: var(--font-mono);
+  background: rgba(0, 0, 0, 0.07);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.88em;
+}
+html.dark-mode .message__bubble strong { color: var(--color-primary); }
+html.dark-mode .message__bubble code { background: rgba(255, 255, 255, 0.12); }
+html.high-contrast .message__bubble code { border: 1px solid var(--color-border); }
 
 .message--user .message__bubble {
   background: var(--color-primary-soft);

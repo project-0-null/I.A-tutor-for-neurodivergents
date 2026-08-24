@@ -55,6 +55,7 @@ GENERATION_CONFIG = genai.types.GenerationConfig(
     temperature=0.1,  # Valor baixo (0.0 a 0.2) para respostas literais, precisas e objetivas
     top_p=0.95,
     top_k=40,
+    max_output_tokens=1000,
 )
 
 # Inicializa o modelo Generative AI com o System Instruction pré-injetado
@@ -77,9 +78,10 @@ app = FastAPI(
 )
 
 # Configuração de CORS para permitir requisições do Front-end
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Em produção, restrinja para o domínio exato do Front-end
+    allow_origins=[origin.strip() for origin in ALLOWED_ORIGINS if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -151,40 +153,64 @@ async def chat_endpoint(payload: ChatRequest):
             user_content = payload.message.strip()
 
         # --- Montagem e Limitação do Histórico de Conversa ---
-        # Mantém até as últimas 6 mensagens anteriores para preservar o contexto sem estourar tokens
+        # Mantém até as últimas 6 mensagens anteriores e garante alternância estrita de papéis
         MAX_HISTORY_ITEMS = 6
-        recent_history = payload.history[-MAX_HISTORY_ITEMS:] if payload.history else []
+        raw_history = payload.history[-MAX_HISTORY_ITEMS:] if payload.history else []
 
         gemini_contents = []
-        for item in recent_history:
-            # Mapeia para o formato de mensagens exigido pelo SDK do Gemini
-            gemini_contents.append({
-                "role": "user" if item.role == RoleEnum.USER else "model",
-                "parts": [item.content]
-            })
+        last_role = None
+
+        for item in raw_history:
+            role = "user" if item.role == RoleEnum.USER else "model"
+            # Se houver turnos repetidos do mesmo papel, concatena para manter alternância válida
+            if role == last_role and gemini_contents:
+                gemini_contents[-1]["parts"][0] += f"\n{item.content}"
+            else:
+                gemini_contents.append({
+                    "role": role,
+                    "parts": [item.content]
+                })
+                last_role = role
 
         # Adiciona a mensagem atual formatada
-        gemini_contents.append({
-            "role": "user",
-            "parts": [user_content]
-        })
+        if last_role == "user" and gemini_contents:
+            gemini_contents[-1]["parts"][0] += f"\n\n{user_content}"
+        else:
+            gemini_contents.append({
+                "role": "user",
+                "parts": [user_content]
+            })
 
         logger.info(
-            f"Processando requisição. Histórico: {len(recent_history)} msgs | "
+            f"Processando requisição. Turnos válidos: {len(gemini_contents)} | "
             f"Hiperfoco: {'Sim (' + cleaned_hiperfoco + ')' if cleaned_hiperfoco else 'Não informado'}"
         )
 
-        # --- Chamada ao Modelo Gemini ---
-        gemini_response = model.generate_content(gemini_contents)
+        # --- Chamada Assíncrona ao Modelo Gemini (sem travar o event loop do FastAPI) ---
+        gemini_response = await model.generate_content_async(gemini_contents)
 
-        if not gemini_response.text:
+        # --- Extração Segura da Resposta ---
+        reply_text = None
+        try:
+            reply_text = gemini_response.text
+        except (ValueError, AttributeError):
+            # Se a resposta foi bloqueada por moderação/segurança
+            if gemini_response.candidates and gemini_response.candidates[0].finish_reason:
+                reason = gemini_response.candidates[0].finish_reason.name
+                logger.warning(f"Resposta filtrada pelo modelo. Motivo: {reason}")
+                reply_text = (
+                    "Não consegui responder a essa pergunta específica devido às diretrizes de segurança e conteúdo. "
+                    "Podemos tentar formular de outro jeito?"
+                )
+
+        if not reply_text:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="A IA não conseguiu formular uma resposta para esta solicitação."
             )
 
         return ChatResponse(
-            response=gemini_response.text,
+            response=reply_text,
             status="success"
         )
 

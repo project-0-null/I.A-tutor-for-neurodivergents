@@ -12,7 +12,9 @@
   /* ------------------------------------------------------------------------
    * Configuração
    * ---------------------------------------------------------------------- */
-  const API_URL = 'http://localhost:8000/api/chat';
+  const API_URL = (window.location.protocol.startsWith('http') && (window.location.port === '8000' || window.location.pathname.startsWith('/api')))
+    ? '/api/chat'
+    : 'http://localhost:8000/api/chat';
   const STORAGE_KEY = 'tutorA11y.prefs.v1';
   const MAX_HISTORY_MESSAGES = 20; // limite de mensagens enviadas no campo "history"
   const FONT_SCALE_STEPS = [0.9, 1, 1.1, 1.2, 1.3];
@@ -283,8 +285,13 @@
   }
 
   function applyInlineFormatting(escapedLine) {
-    // **negrito** -> <strong>negrito</strong> (já escapado, seguro para inserir)
-    return escapedLine.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    return escapedLine
+      // `código inline` -> <code>código inline</code>
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      // **negrito** -> <strong>negrito</strong> (já escapado, seguro para inserir)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      // *itálico* -> <em>itálico</em>
+      .replace(/(^|[^*])\*([^*]+)\*([^*]|$)/g, '$1<em>$2</em>$3');
   }
 
   function formatMessageToHtml(rawText) {
@@ -542,7 +549,7 @@
 
     appendTutorMessage(replyText);
     conversationHistory.push({ role: 'user', content: trimmed });
-    conversationHistory.push({ role: 'model', content: replyText });
+    conversationHistory.push({ role: 'assistant', content: replyText });
 
     setFormBusy(false);
   }
@@ -550,6 +557,9 @@
   function setFormBusy(isBusy) {
     dom.btnEnviar.disabled = isBusy;
     dom.campoMensagem.disabled = isBusy;
+    dom.quickPromptButtons.forEach((btn) => {
+      btn.disabled = isBusy;
+    });
     if (!isBusy) {
       dom.campoMensagem.focus();
     }
@@ -581,7 +591,7 @@
     });
 
     dom.campoMensagem.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && !event.shiftKey) {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
         dom.form.requestSubmit();
       }
