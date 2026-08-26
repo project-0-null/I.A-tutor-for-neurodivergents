@@ -446,6 +446,7 @@ summary:focus-visible {
   font-weight: 700;
 }
 .icon-btn:hover { border-color: var(--color-primary); }
+.icon-btn--attach { flex-shrink: 0; }
 .size-control__value {
   min-width: 3.5rem;
   text-align: center;
@@ -589,6 +590,15 @@ summary:focus-visible {
 .message__bubble li { margin-bottom: 0.3rem; }
 .message__bubble li::marker { color: var(--color-primary); font-weight: 700; }
 .message__bubble strong { color: var(--color-primary-dark); font-weight: 700; }
+
+.message__image {
+  display: block;
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: var(--radius-md);
+  margin-bottom: 0.5rem;
+  object-fit: contain;
+}
 .message__bubble em { font-style: italic; color: inherit; }
 .message__bubble code {
   font-family: var(--font-mono);
@@ -716,7 +726,66 @@ html.high-contrast .message__bubble pre { border: 1px solid var(--color-border);
   resize: none;
   min-height: 2.75rem;
   max-height: 10rem;
+  flex: 1;
+  min-width: 0; /* mesma proteção usada nas bolhas: evita que o item de flex estoure a largura */
 }
+.send-btn { flex-shrink: 0; }
+
+/* Prévia da imagem anexada, antes de enviar */
+.image-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.4rem 0.6rem;
+  margin-bottom: var(--space-2);
+}
+.image-preview__thumb {
+  width: 2.5rem;
+  height: 2.5rem;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: var(--color-border);
+}
+.image-preview__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-preview__remove {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.image-preview__remove:hover {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
+/* Erro de validação da imagem (arquivo grande demais, formato não aceito, etc.) */
+.field-error {
+  color: var(--color-danger-text);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.7rem;
+  font-size: 0.82rem;
+  margin-bottom: var(--space-2);
+}
+
 .chat-form__hint {
   margin-top: 0.4rem;
   font-size: 0.72rem;

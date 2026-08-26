@@ -191,19 +191,33 @@
         <!-- Entrada de texto -->
         <form id="chat-form" class="chat-form">
           <label for="campo-mensagem" class="field-label">Sua pergunta</label>
+
+          <!-- Prévia da imagem anexada (some quando não há nenhuma) -->
+          <div id="image-preview" class="image-preview" hidden>
+            <img id="image-preview-thumb" class="image-preview__thumb" alt="">
+            <span id="image-preview-name" class="image-preview__name"></span>
+            <button type="button" id="btn-remover-imagem" class="image-preview__remove" aria-label="Remover imagem anexada">×</button>
+          </div>
+          <p id="image-error" class="field-error" role="alert" hidden></p>
+
           <div class="chat-form__row">
+            <input type="file" id="campo-imagem" accept="image/png,image/jpeg,image/webp,image/heic,image/heif" capture="environment" class="visually-hidden">
+            <button type="button" id="btn-anexar-imagem" class="icon-btn icon-btn--attach" aria-label="Anexar uma foto (ex.: de um exercício) para o tutor ler">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M9 3a3 3 0 0 0-3 3v9a5 5 0 0 0 10 0V7a1 1 0 1 1 2 0v8a7 7 0 1 1-14 0V6a5 5 0 0 1 10 0v9a3 3 0 1 1-6 0V7a1 1 0 1 1 2 0v8a1 1 0 1 0 2 0V6a3 3 0 0 0-3-3z"/>
+              </svg>
+            </button>
             <textarea
               id="campo-mensagem"
               class="text-input text-input--area"
               rows="1"
               placeholder="Digite sua pergunta aqui..."
-              required
             ></textarea>
             <button type="submit" id="btn-enviar" class="send-btn">
               <span>Enviar</span>
             </button>
           </div>
-          <p class="chat-form__hint">Enter envia · Shift + Enter quebra a linha</p>
+          <p class="chat-form__hint">Enter envia · Shift + Enter quebra a linha · Anexe uma foto para o tutor transcrever o texto nela</p>
         </form>
 
       </main>

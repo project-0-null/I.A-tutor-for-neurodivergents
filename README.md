@@ -10,6 +10,8 @@ Um assistente educacional acessível com inteligência artificial generativa (Go
 * **Comunicação Literal e Objetiva:** Respostas diretas, sem ambiguidades, metáforas complexas, ironias ou linguagem de duplo sentido.
 * **Estrutura de Resposta Padronizada:** Todas as explicações seguem rigorosamente o formato de **2 parágrafos curtos conceituais + 3 bullet points com os pontos-chave**.
 * **Adaptação a Hiperfoco / Interesses Especiais:** Se o estudante informar um tema de interesse (ex.: astronomia, trens, dinossauros), o tutor formula analogias e exemplos práticos baseados diretamente nesse assunto.
+* **Transcrição de Imagens / Fotos de Exercícios:** O aluno pode anexar fotos de enunciados, anotações ou livros. O tutor transcreve o texto com precisão para facilitar a leitura antes de explicar.
+* **Fórmulas Matemáticas em LaTeX com KaTeX:** Equações e expressões científicas são formatadas em notação LaTeX e renderizadas pelo KaTeX para alta clareza visual.
 * **Perguntas Rápidas (Chips):** Ações de um clique para pedir simplificação, exemplos adicionais, resumo ou passo a passo.
 
 ### 👁️ 2. Painel de Conforto Sensorial e Acessibilidade (WCAG)
@@ -26,14 +28,15 @@ Um assistente educacional acessível com inteligência artificial generativa (Go
 
 * **Back-end:**
   * [Python 3.10+](https://www.python.org/)
-  * [FastAPI](https://fastapi.tiangolo.com/) (Endpoints REST assíncronos)
+  * [FastAPI](https://fastapi.tiangolo.com/) (Endpoints REST assíncronos e servidor seguro de estáticos)
   * [Uvicorn](https://www.uvicorn.org/) (Servidor ASGI de alta performance)
-  * [Google Generative AI](https://ai.google.dev/) (`gemini-1.5-flash` com System Instructions)
+  * [Google GenAI SDK](https://github.com/googleapis/python-genai) (`google-genai` com System Instructions e modelo `gemini-3.6-flash`)
   * [Pydantic v2](https://docs.pydantic.dev/) (Validação e tipagem de dados)
 * **Front-end:**
   * HTML5 Semântico com atributos WAI-ARIA
   * CSS3 Moderno (Design Tokens, Variáveis CSS, Animações suaves)
   * JavaScript Vanilla (sem inchaço de dependências ou frameworks)
+  * [KaTeX](https://katex.org/) (Renderização acessível e ultrarrápida de fórmulas matemáticas)
 * **Containerização:**
   * [Docker](https://www.docker.com/) & Docker Compose
 

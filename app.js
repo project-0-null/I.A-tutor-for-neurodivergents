@@ -19,6 +19,11 @@
   const MAX_HISTORY_MESSAGES = 20; // limite de mensagens enviadas no campo "history"
   const FONT_SCALE_STEPS = [0.9, 1, 1.1, 1.2, 1.3];
 
+  // Mesmos limites validados no backend (main.py) — checar aqui só dá feedback mais rápido,
+  // a validação que realmente importa (segurança) é sempre a do servidor.
+  const ALLOWED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+  const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
+
   const FONT_STACKS = {
     lexend: 'var(--font-default)',
     arial: 'var(--font-arial)',
@@ -56,6 +61,14 @@
     form: document.getElementById('chat-form'),
     campoMensagem: document.getElementById('campo-mensagem'),
     btnEnviar: document.getElementById('btn-enviar'),
+
+    campoImagem: document.getElementById('campo-imagem'),
+    btnAnexarImagem: document.getElementById('btn-anexar-imagem'),
+    imagePreview: document.getElementById('image-preview'),
+    imagePreviewThumb: document.getElementById('image-preview-thumb'),
+    imagePreviewName: document.getElementById('image-preview-name'),
+    btnRemoverImagem: document.getElementById('btn-remover-imagem'),
+    imageError: document.getElementById('image-error'),
   };
 
   /* ------------------------------------------------------------------------
@@ -64,6 +77,9 @@
 
   /** Histórico da conversa, mantido em memória e enviado a cada requisição. */
   let conversationHistory = [];
+
+  /** Imagem anexada e ainda não enviada: { base64, mimeType, name, dataUrl } | null. */
+  let attachedImage = null;
 
   /** Preferências de acessibilidade, persistidas em localStorage entre sessões. */
   let prefs = {
@@ -427,7 +443,7 @@
     dom.chatLog.scrollTop = dom.chatLog.scrollHeight;
   }
 
-  function appendMessage({ role, html, plainTextForHistory }) {
+  function appendMessage({ role, html, plainTextForHistory, imageDataUrl }) {
     const wrapper = document.createElement('div');
     wrapper.className = `message message--${role}`;
 
@@ -437,7 +453,20 @@
 
     const bubble = document.createElement('div');
     bubble.className = 'message__bubble';
-    bubble.innerHTML = html;
+
+    if (imageDataUrl) {
+      const img = document.createElement('img');
+      img.className = 'message__image';
+      img.src = imageDataUrl;
+      img.alt = 'Foto enviada por você';
+      bubble.appendChild(img);
+    }
+
+    const contentWrapper = document.createElement('div');
+    contentWrapper.innerHTML = html;
+    while (contentWrapper.firstChild) {
+      bubble.appendChild(contentWrapper.firstChild);
+    }
     renderMathIn(bubble);
 
     wrapper.appendChild(author);
@@ -448,11 +477,12 @@
     return { wrapper, plainTextForHistory };
   }
 
-  function appendUserMessage(text) {
+  function appendUserMessage(text, imageDataUrl) {
     appendMessage({
       role: 'user',
-      html: formatMessageToHtml(text),
+      html: text.trim() ? formatMessageToHtml(text) : '',
       plainTextForHistory: text,
+      imageDataUrl,
     });
   }
 
@@ -551,20 +581,31 @@
 
   /**
    * Envia a mensagem do aluno para a API e trata a resposta (ou erro).
+   * Também funciona só com uma imagem anexada, sem nenhum texto digitado.
    * @param {string} messageText
    */
   async function sendMessage(messageText) {
     const trimmed = messageText.trim();
-    if (!trimmed) return;
+    const imageToSend = attachedImage;
+
+    if (!trimmed && !imageToSend) return;
+
+    // Se só a imagem foi anexada, sem pergunta escrita, usamos um pedido padrão de
+    // transcrição — o campo "message" é obrigatório na API, e assim o aluno não
+    // precisa digitar nada para simplesmente "mostrar a foto" ao tutor.
+    const effectiveText = trimmed || 'Transcreva o texto desta imagem.';
 
     setFormBusy(true);
-    appendUserMessage(trimmed);
+    appendUserMessage(trimmed, imageToSend ? imageToSend.dataUrl : undefined);
+    clearAttachedImage();
     showLoadingIndicator();
 
     const payload = {
-      message: trimmed,
+      message: effectiveText,
       hiperfoco: prefs.hiperfoco.trim() ? prefs.hiperfoco.trim() : null,
       history: buildHistoryPayload(),
+      image_base64: imageToSend ? imageToSend.base64 : null,
+      image_mime_type: imageToSend ? imageToSend.mimeType : null,
     };
 
     let response;
@@ -627,7 +668,7 @@
     }
 
     appendTutorMessage(replyText);
-    conversationHistory.push({ role: 'user', content: trimmed });
+    conversationHistory.push({ role: 'user', content: effectiveText });
     conversationHistory.push({ role: 'assistant', content: replyText });
 
     setFormBusy(false);
@@ -636,12 +677,104 @@
   function setFormBusy(isBusy) {
     dom.btnEnviar.disabled = isBusy;
     dom.campoMensagem.disabled = isBusy;
+    dom.btnAnexarImagem.disabled = isBusy;
     dom.quickPromptButtons.forEach((btn) => {
       btn.disabled = isBusy;
     });
     if (!isBusy) {
       dom.campoMensagem.focus();
     }
+  }
+
+  /* ------------------------------------------------------------------------
+   * Anexo de imagem (foto para o tutor transcrever)
+   * ---------------------------------------------------------------------- */
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error('Falha ao ler o arquivo.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function showImageError(message) {
+    dom.imageError.textContent = message;
+    dom.imageError.hidden = false;
+  }
+
+  function clearImageError() {
+    dom.imageError.textContent = '';
+    dom.imageError.hidden = true;
+  }
+
+  function showImagePreview() {
+    if (!attachedImage) return;
+    dom.imagePreviewThumb.src = attachedImage.dataUrl;
+    dom.imagePreviewName.textContent = attachedImage.name;
+    dom.imagePreview.hidden = false;
+  }
+
+  function clearAttachedImage() {
+    attachedImage = null;
+    dom.imagePreview.hidden = true;
+    dom.imagePreviewThumb.src = '';
+    dom.imagePreviewName.textContent = '';
+    dom.campoImagem.value = ''; // permite selecionar o mesmo arquivo de novo depois
+  }
+
+  async function handleImageFileSelected(file) {
+    clearImageError();
+
+    if (!file) return;
+
+    if (!ALLOWED_IMAGE_MIME_TYPES.includes(file.type)) {
+      showImageError('Formato não suportado. Envie uma foto em JPEG, PNG, WEBP ou HEIC.');
+      dom.campoImagem.value = '';
+      return;
+    }
+
+    if (file.size > MAX_IMAGE_BYTES) {
+      showImageError(`Imagem muito grande. O tamanho máximo é ${Math.round(MAX_IMAGE_BYTES / (1024 * 1024))} MB.`);
+      dom.campoImagem.value = '';
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const base64 = String(dataUrl).split(',', 2)[1] || '';
+      if (!base64) throw new Error('Não foi possível ler os dados da imagem.');
+
+      attachedImage = {
+        base64,
+        mimeType: file.type,
+        name: file.name || 'imagem',
+        dataUrl,
+      };
+      showImagePreview();
+      announce(`Imagem "${attachedImage.name}" anexada.`);
+    } catch (err) {
+      console.warn('Falha ao processar a imagem selecionada:', err);
+      showImageError('Não foi possível carregar essa imagem. Tente outro arquivo.');
+      clearAttachedImage();
+    }
+  }
+
+  function initImageAttachment() {
+    dom.btnAnexarImagem.addEventListener('click', () => {
+      dom.campoImagem.click();
+    });
+
+    dom.campoImagem.addEventListener('change', () => {
+      const file = dom.campoImagem.files && dom.campoImagem.files[0];
+      handleImageFileSelected(file);
+    });
+
+    dom.btnRemoverImagem.addEventListener('click', () => {
+      clearAttachedImage();
+      clearImageError();
+      announce('Imagem removida.');
+    });
   }
 
   /* ------------------------------------------------------------------------
@@ -663,7 +796,7 @@
     dom.form.addEventListener('submit', (event) => {
       event.preventDefault();
       const text = dom.campoMensagem.value;
-      if (!text.trim()) return;
+      if (!text.trim() && !attachedImage) return; // permite enviar só a imagem, sem texto
       dom.campoMensagem.value = '';
       autoResizeTextarea();
       sendMessage(text);
@@ -684,6 +817,8 @@
         if (text) sendMessage(text);
       });
     });
+
+    initImageAttachment();
   }
 
   /* ------------------------------------------------------------------------
@@ -696,6 +831,21 @@
     initPreferenceControls();
     initChatForm();
     renderMathIn(dom.chatLog);
+
+    // Se o KaTeX não carregou (CDN bloqueado, sem internet, cache antigo, etc.),
+    // avisa em vez de deixar as fórmulas aparecerem cruas sem explicação.
+    if (typeof window.renderMathInElement !== 'function') {
+      console.error(
+        'KaTeX não carregou: window.renderMathInElement está indefinido. ' +
+        'Verifique na aba Network do DevTools se katex.min.js e auto-render.min.js ' +
+        'retornaram status 200, e se não há erro de integridade (SRI) no Console.'
+      );
+      appendSystemMessage(
+        'As fórmulas matemáticas podem aparecer como texto simples agora: não consegui carregar o ' +
+        'renderizador de LaTeX (isso normalmente acontece por falta de internet ou bloqueio do CDN). ' +
+        'Verifique sua conexão e recarregue a página.'
+      );
+    }
   }
 
   document.addEventListener('DOMContentLoaded', init);
