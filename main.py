@@ -208,31 +208,21 @@ async def chat_endpoint(payload: ChatRequest):
     """
     try:
         # --- Tratamento de Variável Dinâmica (Hiperfoco) ---
-        # Garante que não enviamos variáveis vazias ou somente com espaços para o modelo
         cleaned_hiperfoco = payload.hiperfoco.strip() if payload.hiperfoco else None
         
+        # Inicia o texto apenas com a dúvida real do aluno
+        user_text = payload.message.strip()
+        
+        # Adiciona o hiperfoco no final, como uma instrução secundária, para não confundir a visão do modelo
         if cleaned_hiperfoco:
-            # Se o hiperfoco foi preenchido, contextualiza a mensagem do usuário
-            user_content = (
-                f"[Tema de Hiperfoco do Aluno: {cleaned_hiperfoco}]\n\n"
-                f"Pergunta do aluno: {payload.message.strip()}"
-            )
-        else:
-            # Caso não tenha sido informado, envia somente a dúvida direta
-            user_content = payload.message.strip()
+            user_text += f"\n\n[Instrução interna: o aluno tem hiperfoco em {cleaned_hiperfoco}. Use analogias com isso se for explicar algo.]"
 
         # --- Imagem Anexada (opcional) ---
-        # Validada e decodificada ANTES de qualquer chamada ao Gemini; se algo estiver
-        # errado (formato não suportado, base64 corrompido, arquivo grande demais),
-        # o erro já sai daqui como HTTPException e é repassado pelo "except HTTPException" abaixo.
         image_bytes: Optional[bytes] = None
         if payload.image_base64:
             image_bytes = decode_and_validate_image(payload.image_base64, payload.image_mime_type)
 
         # --- Montagem e Limitação do Histórico de Conversa ---
-        # Mantém até as últimas 6 mensagens anteriores e garante alternância estrita de papéis.
-        # Observação: só a mensagem ATUAL pode conter imagem — imagens de turnos anteriores não
-        # são reenviadas a cada requisição, para manter o payload leve.
         MAX_HISTORY_ITEMS = 6
         raw_history = payload.history[-MAX_HISTORY_ITEMS:] if payload.history else []
 
@@ -241,25 +231,25 @@ async def chat_endpoint(payload: ChatRequest):
 
         for item in raw_history:
             role = "user" if item.role == RoleEnum.USER else "model"
-            # Se houver turnos repetidos do mesmo papel, concatena para manter alternância válida
             if role == last_role and gemini_contents:
                 gemini_contents[-1] = genai_types.Content(
                     role=role,
-                    parts=list(gemini_contents[-1].parts) + [genai_types.Part(text=item.content)],
+                    parts=list(gemini_contents[-1].parts) + [genai_types.Part.from_text(text=item.content)],
                 )
             else:
                 gemini_contents.append(
-                    genai_types.Content(role=role, parts=[genai_types.Part(text=item.content)])
+                    genai_types.Content(role=role, parts=[genai_types.Part.from_text(text=item.content)])
                 )
                 last_role = role
 
-        # Monta as partes da mensagem atual: imagem antes do texto para garantir o reconhecimento visual
+        # Monta as partes da mensagem atual: imagem sempre ANTES do texto
         current_parts = []
         if image_bytes is not None:
             current_parts.append(
                 genai_types.Part.from_bytes(data=image_bytes, mime_type=payload.image_mime_type)
             )
-        current_parts.append(genai_types.Part(text=user_content))
+        
+        current_parts.append(genai_types.Part.from_text(text=user_text))
 
         if last_role == "user" and gemini_contents:
             gemini_contents[-1] = genai_types.Content(

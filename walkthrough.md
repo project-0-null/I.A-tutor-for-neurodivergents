@@ -37,6 +37,10 @@ Concluímos a revisão completa das novas funcionalidades e implementamos as cor
 ### 4. Documentação: Sincronização do `README.md`
 - Atualizado o `README.md` com as tecnologias mais recentes e descrição das novas ferramentas (KaTeX, Transcrição de Imagens).
 
+### 5. Resolução de Prompt Masking no Fluxo Multimodal
+- **Problema**: O prefixo textual de hiperfoco no início da mensagem do aluno competia com a atenção visual do Gemini, fazendo o modelo ignorar a imagem e focar no texto do cabeçalho.
+- **Correção**: A dúvida real do aluno agora é posicionada no início, o hiperfoco é anexado como nota contextual secundária ao final, a imagem sempre precede o texto em `current_parts`, e o método oficial `genai_types.Part.from_text` é utilizado.
+
 ---
 
 ## 🧪 Resultados dos Testes Automatizados
