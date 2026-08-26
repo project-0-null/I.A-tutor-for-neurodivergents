@@ -67,8 +67,8 @@ Suas diretrizes de comunicação são fundamentais e devem ser seguidas com rigo
 
 # Configuração de geração (temperatura baixa = respostas mais literais e determinísticas)
 # e o System Instruction, unificados em um único objeto de configuração reutilizável.
-# Recomenda-se gemini-3.6-flash pelo equilíbrio de velocidade, custo e capacidade de seguir instruções.
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+# Recomenda-se gemini-1.5-flash pelo equilíbrio de velocidade, custo e capacidade de seguir instruções.
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
 GENERATION_CONFIG = genai_types.GenerateContentConfig(
     system_instruction=SYSTEM_INSTRUCTION,
@@ -253,12 +253,13 @@ async def chat_endpoint(payload: ChatRequest):
                 )
                 last_role = role
 
-        # Monta as partes da mensagem atual: texto sempre, imagem só se foi enviada
-        current_parts = [genai_types.Part(text=user_content)]
+        # Monta as partes da mensagem atual: imagem antes do texto para garantir o reconhecimento visual
+        current_parts = []
         if image_bytes is not None:
             current_parts.append(
                 genai_types.Part.from_bytes(data=image_bytes, mime_type=payload.image_mime_type)
             )
+        current_parts.append(genai_types.Part(text=user_content))
 
         if last_role == "user" and gemini_contents:
             gemini_contents[-1] = genai_types.Content(
