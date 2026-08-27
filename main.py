@@ -2,6 +2,8 @@ import os
 import base64
 import binascii
 import logging
+import asyncio
+import random
 from typing import List, Optional
 from enum import Enum
 
@@ -67,8 +69,8 @@ Suas diretrizes de comunicação são fundamentais e devem ser seguidas com rigo
 
 # Configuração de geração (temperatura baixa = respostas mais literais e determinísticas)
 # e o System Instruction, unificados em um único objeto de configuração reutilizável.
-# Recomenda-se gemini-1.5-flash pelo equilíbrio de velocidade, custo e capacidade de seguir instruções.
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+FALLBACK_MODEL_NAME = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-flash-latest")
 
 GENERATION_CONFIG = genai_types.GenerateContentConfig(
     system_instruction=SYSTEM_INSTRUCTION,
@@ -81,6 +83,19 @@ GENERATION_CONFIG = genai_types.GenerateContentConfig(
 # Formatos de imagem aceitos e tamanho máximo por requisição (dados já decodificados de base64)
 ALLOWED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
+
+# -----------------------------------------------------------------------------
+# 2.1. Configuração de Retry (erros transitórios da API do Gemini)
+# -----------------------------------------------------------------------------
+# Só faz sentido tentar de novo automaticamente para erros TRANSITÓRIOS:
+#   429 = limite de requisições momentâneo (quota por minuto)
+#   500, 502, 503, 504 = instabilidade ou alta demanda ("high demand") nos servidores do Google
+# Erros como 400 (requisição inválida) ou 403 (permissão/chave) NUNCA devem ser re-tentados.
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+MAX_RETRIES = 3                 # número de NOVAS tentativas após a primeira (total = 1 + MAX_RETRIES)
+RETRY_BASE_DELAY_SECONDS = 1.0  # espera antes da 1ª retentativa
+RETRY_MAX_DELAY_SECONDS = 6.0   # teto de espera, pra não deixar o usuário esperando demais
+RETRY_JITTER_SECONDS = 0.5      # variação aleatória pra evitar que retries "colidam" em rajada
 
 
 # -----------------------------------------------------------------------------
@@ -187,6 +202,69 @@ def decode_and_validate_image(image_base64: str, mime_type: Optional[str]) -> by
     return raw
 
 
+async def generate_content_with_retry(
+    *,
+    model: str,
+    contents: List[genai_types.Content],
+    config: genai_types.GenerateContentConfig,
+    fallback_model: Optional[str] = None,
+):
+    """
+    Chama client.aio.models.generate_content com retry automático e backoff
+    exponencial (+ jitter) para erros TRANSITÓRIOS da API do Gemini (429, 500, 502, 503, 504).
+
+    Se todas as tentativas no modelo principal falharem por indisponibilidade/sobrecarga (503/504)
+    e houver um fallback_model configurado, tenta automaticamente o modelo de fallback.
+    """
+    current_model = model
+    attempt = 0
+    used_fallback = False
+
+    while True:
+        try:
+            return await client.aio.models.generate_content(
+                model=current_model,
+                contents=contents,
+                config=config,
+            )
+        except genai_errors.APIError as e:
+            status_code = getattr(e, "code", None) or getattr(e, "status_code", None) or 500
+
+            # Se o servidor do Google acusar 503 (alta demanda) ou 504 (timeout) e temos um modelo de fallback,
+            # alternamos para o fallback para não deixar o usuário esperando.
+            if (
+                status_code in {500, 502, 503, 504}
+                and fallback_model
+                and not used_fallback
+                and fallback_model != current_model
+            ):
+                logger.warning(
+                    f"Modelo principal '{current_model}' retornou status {status_code} (alta demanda/indisponibilidade). "
+                    f"Acionando imediatamente o modelo de fallback '{fallback_model}'..."
+                )
+                current_model = fallback_model
+                used_fallback = True
+                attempt = 0
+                continue
+
+            if status_code not in RETRYABLE_STATUS_CODES or attempt >= MAX_RETRIES:
+                if attempt > 0 or used_fallback:
+                    logger.error(
+                        f"Falha na API no modelo '{current_model}' após {attempt} retentativa(s) (status {status_code}): {str(e)}"
+                    )
+                raise
+
+            attempt += 1
+            delay = min(RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1)), RETRY_MAX_DELAY_SECONDS)
+            delay += random.uniform(0, RETRY_JITTER_SECONDS)
+
+            logger.warning(
+                f"Erro transitório do Gemini no modelo '{current_model}' (status {status_code}). "
+                f"Retentativa {attempt}/{MAX_RETRIES} em {delay:.1f}s. Detalhe: {str(e)}"
+            )
+            await asyncio.sleep(delay)
+
+
 # -----------------------------------------------------------------------------
 # 6. Endpoints da API
 # -----------------------------------------------------------------------------
@@ -266,10 +344,12 @@ async def chat_endpoint(payload: ChatRequest):
         )
 
         # --- Chamada Assíncrona ao Modelo Gemini (sem travar o event loop do FastAPI) ---
-        gemini_response = await client.aio.models.generate_content(
+        # Com retry automático e fallback para erros transitórios (503 / 429)
+        gemini_response = await generate_content_with_retry(
             model=MODEL_NAME,
             contents=gemini_contents,
             config=GENERATION_CONFIG,
+            fallback_model=FALLBACK_MODEL_NAME,
         )
 
         # --- Extração Segura da Resposta ---
@@ -278,6 +358,20 @@ async def chat_endpoint(payload: ChatRequest):
             reply_text = gemini_response.text
         except (ValueError, AttributeError):
             reply_text = None
+
+        # Se .text for None (ex.: partes precisam ser extraídas manualmente de candidates)
+        if not reply_text and getattr(gemini_response, "candidates", None):
+            try:
+                for candidate in gemini_response.candidates:
+                    if candidate.content and candidate.content.parts:
+                        extracted = "".join(
+                            getattr(part, "text", "") for part in candidate.content.parts if getattr(part, "text", None)
+                        )
+                        if extracted.strip():
+                            reply_text = extracted.strip()
+                            break
+            except Exception:
+                pass
 
         if not reply_text:
             # Resposta vazia ou bloqueada por moderação/segurança
@@ -307,8 +401,6 @@ async def chat_endpoint(payload: ChatRequest):
         )
 
     # --- Tratamento de Erros da API do Gemini (rate limit, indisponibilidade, etc.) ---
-    # google.genai.errors.APIError cobre tanto ClientError (4xx) quanto ServerError (5xx);
-    # usamos getattr por segurança, já que o nome exato do atributo pode variar entre versões do SDK.
     except genai_errors.APIError as e:
         status_code = getattr(e, "code", None) or getattr(e, "status_code", None) or 500
 
@@ -317,6 +409,13 @@ async def chat_endpoint(payload: ChatRequest):
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Nosso tutor está processando muitas dúvidas agora, tente novamente em um minuto!"
+            )
+
+        if status_code in {503, 504}:
+            logger.warning(f"Modelo Gemini indisponível por alta demanda mesmo após retries e fallback ({status_code}): {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="O modelo de IA está com alta demanda no momento. Tente novamente em alguns instantes."
             )
 
         logger.error(f"Erro na chamada da API do Gemini (status {status_code}): {str(e)}")
