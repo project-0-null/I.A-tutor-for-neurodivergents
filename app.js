@@ -787,9 +787,15 @@
     'passo-a-passo': 'Pode explicar isso passo a passo?',
   };
 
+  const TEXTAREA_MAX_HEIGHT_PX = 160; // deve bater com max-height: 10rem em .text-input--area no CSS
+
   function autoResizeTextarea() {
-    dom.campoMensagem.style.height = 'auto';
-    dom.campoMensagem.style.height = `${Math.min(dom.campoMensagem.scrollHeight, 160)}px`;
+    const el = dom.campoMensagem;
+    el.style.height = 'auto'; // encolhe primeiro, senão scrollHeight nunca diminui ao apagar texto
+    const contentHeight = el.scrollHeight;
+    el.style.height = `${Math.min(contentHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+    // só mostra a barra/scroll interno quando o texto realmente ultrapassa a altura máxima
+    el.style.overflowY = contentHeight > TEXTAREA_MAX_HEIGHT_PX ? 'auto' : 'hidden';
   }
 
   function initChatForm() {
