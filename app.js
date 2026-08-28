@@ -14,7 +14,7 @@
    * ---------------------------------------------------------------------- */
   const API_URL = (window.location.protocol.startsWith('http') && (window.location.port === '8000' || window.location.pathname.startsWith('/api')))
     ? '/api/chat'
-    : 'http://localhost:8000/api/chat';
+    : 'https://commuting-sixth-tiling.ngrok-free.dev/api/chat';
   const STORAGE_KEY = 'tutorA11y.prefs.v1';
   const MAX_HISTORY_MESSAGES = 20; // limite de mensagens enviadas no campo "history"
   const FONT_SCALE_STEPS = [0.9, 1, 1.1, 1.2, 1.3];
