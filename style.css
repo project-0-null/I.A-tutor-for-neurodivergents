@@ -333,10 +333,56 @@ summary:focus-visible {
 .app-footer {
   padding: var(--space-3) var(--space-4) var(--space-4);
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
 }
 .app-footer p {
   font-size: 0.8rem;
   color: var(--color-text-muted);
+}
+.app-footer__credit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.app-footer__author {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+.app-footer__author strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.app-footer__socials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+.app-footer__social-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.app-footer__social-link:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+  background-color: var(--color-primary-soft);
+  transform: translateY(-2px);
+}
+.app-footer__social-link svg {
+  display: block;
 }
 
 /* --------------------------------------------------------------------------
