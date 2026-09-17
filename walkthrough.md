@@ -1,76 +1,99 @@
-# 🚀 Walkthrough: Revisão e Correções Aplicadas
+# 🚀 Walkthrough: Segurança, Transcrição Fiel de Imagens e Guia do Ngrok
 
-Concluímos a revisão completa das novas funcionalidades e implementamos as correções de segurança, usabilidade e compatibilidade no projeto.
-
----
-
-## 🎯 O que foi revisado e aprovado
-
-1. **Migração para o Google GenAI SDK (`main.py`)**:
-   - Código modernizado utilizando a biblioteca oficial `google-genai` com `genai.Client` e chamadas assíncronas `client.aio.models.generate_content`.
-   - Suporte ao modelo padrão `gemini-3.6-flash`.
-   - Tratamento de exceções com `genai_errors.APIError` tratando rate limits e status 429.
-2. **Suporte Multimodal e Transcrição de Imagens (`main.py`, `app.js`, `index.html`, `style.css`)**:
-   - Envio de imagens em Base64 (JPEG, PNG, WEBP, HEIC, HEIF) com validação de até 8 MB.
-   - Instrução de sistema dedicada à transcrição literal e formatação matemática antes de explicações.
-   - Visualização da foto na bolha de mensagens e prévia antes do envio.
-3. **KaTeX e Fórmulas Matemáticas (`index.html`, `app.js`)**:
-   - Delimitadores `$ ... $` para fórmulas em linha e `$$ ... $$` para bloco.
-   - Diagnóstico em caso de falha de conexão com CDN do KaTeX.
+Concluímos com sucesso as três frentes prioritárias aprovadas: **Segurança e Proteção de Segredos**, **Aprimoramento e Validação da Transcrição de Imagens (OCR com LaTeX)** e a criação do **Guia Oficial de Uso do Ngrok**.
 
 ---
 
-## 🛡️ Correções Implementadas
+## 🛡️ 1. Segurança e Prevenção de Falhas
 
-### 1. Segurança: Proteção de Arquivos Confidenciais
-- **Problema**: O uso de `StaticFiles(directory=BASE_DIR)` expunha `.env`, `main.py` e arquivos do repositório para acesso público na rede.
-- **Correção**: Implementada rota estrita de arquivos estáticos em `main.py` com lista permitida (`index.html`, `style.css`, `app.js`, `logo.jpg`, `favicon.ico`). Requisições a `/.env` ou `/main.py` agora retornam `404 Not Found`.
+### Proteção de Segredos no Docker e Git
+- **`.dockerignore`**: Adicionados `.env` e `.env.*` para garantir que arquivos de variáveis de ambiente com credenciais de API nunca sejam embutidos acidentalmente em imagens Docker.
+- **`.gitignore`**: Criado arquivo oficial e versionado cobrindo ambientes virtuais (`tesla/`, `venv/`), arquivos de ambiente (`.env`), caches Python (`__pycache__`, `*.pyc`), caches de teste e configurações de IDEs.
 
-### 2. Dependências: Atualização do `requirements.txt`
-- **Problema**: O arquivo `requirements.txt` listava a biblioteca legada `google-generativeai`, impedindo builds do Docker e novas instalações.
-- **Correção**: Atualizado para `google-genai>=2.0.0`.
-
-### 3. Usabilidade: Envio de Fotos sem Texto Obrigatório
-- **Problema**: O atributo `required` no `<textarea>` do `index.html` acionava a validação nativa do navegador se o estudante anexasse apenas a foto de um exercício sem digitar nada.
-- **Correção**: Removido o atributo `required`, permitindo que a lógica inteligente do `app.js` preencha a mensagem padrão de transcrição.
-
-### 4. Documentação: Sincronização do `README.md`
-- Atualizado o `README.md` com as tecnologias mais recentes e descrição das novas ferramentas (KaTeX, Transcrição de Imagens).
-
-### 5. Resolução de Prompt Masking no Fluxo Multimodal
-- **Problema**: O prefixo textual de hiperfoco no início da mensagem do aluno competia com a atenção visual do Gemini, fazendo o modelo ignorar a imagem e focar no texto do cabeçalho.
-- **Correção**: A dúvida real do aluno agora é posicionada no início, o hiperfoco é anexado como nota contextual secundária ao final, a imagem sempre precede o texto em `current_parts`, e o método oficial `genai_types.Part.from_text` é utilizado.
+### Blindagem de Payloads no Backend (`main.py`)
+- Aplicadas validações Pydantic de comprimento máximo (`max_length`):
+  - `message`: máx. 5000 caracteres (evita estouro de memória e DoS).
+  - `hiperfoco`: máx. 150 caracteres.
+  - `image_base64`: máx. ~11MB brutos.
+- **CORS para Ngrok**: Inserida regra regex `allow_origin_regex=r"https://.*\.ngrok-free\.(app|dev)|https://.*\.ngrok\.io"` permitindo que novos túneis do ngrok funcionem imediatamente sem necessidade de alterar o arquivo `.env` manualmente a cada sessão.
 
 ---
 
-## 🧪 Resultados dos Testes Automatizados
+## 📝 2. Transcrição Fiel de Imagens e Auto-Compressão
 
-Executamos uma suíte de testes cobrindo todas as rotas e verificações de segurança:
+### Prompt Estruturado no Gemini (`main.py`)
+- A instrução do sistema (`SYSTEM_INSTRUCTION`) foi refinada para separar de forma visualmente previsível a transcrição da explicação pedagógica:
+  ```markdown
+  ### 📝 Transcrição da Imagem
+  [Texto fiel e literal com fórmulas em notação LaTeX $ ou $$]
+
+  ---
+  ### 💡 Explicação
+  [2 parágrafos curtos conceituais + 3 bullet points com os pontos-chave]
+  ```
+- Se o aluno enviar apenas a foto (ou pedir apenas para transcrever), o tutor não gera explicações redundantes, focando na transcrição limpa.
+
+### Auto-Compressão de Fotos no Front-end (`app.js`)
+- Criada a função `compressImageIfNeeded(file)`: fotos tiradas por câmeras de smartphones (que costumam ter entre 10 MB e 25 MB) são redimensionadas via `<canvas>` para no máximo 1920px mantendo nitidez impecável para OCR e reduzindo o peso para ~500 KB a 1.2 MB.
+- Isso elimina o erro `HTTP 413 Request Entity Too Large` e garante envio quase instantâneo mesmo em conexões móveis.
+
+---
+
+## 🌐 3. Suporte Completo e Guia do Ngrok
+
+### Cabeçalho Anti-Warning no Front-end (`app.js`)
+- Adicionado o cabeçalho `'ngrok-skip-browser-warning': 'true'` nas chamadas `fetch()`. O ngrok gratuito não interceptará mais as chamadas da API com sua tela HTML de aviso.
+- A constante `API_URL` agora detecta automaticamente o ambiente (seja porta 8000, Live Server em localhost ou túnel ngrok), eliminando a URL temporária antiga que estava travada no código.
+
+### Documentação Didática (`COMO_USAR_NGROK.md`)
+- Criado o arquivo [`COMO_USAR_NGROK.md`](file:///home/blu/workspace/Projetos/tesla/COMO_USAR_NGROK.md) com:
+  - Instruções de instalação (Linux, Windows, Mac).
+  - Configuração do authtoken gratuito.
+  - Como rodar `ngrok http 8000`.
+  - Como acessar direto pelo celular e fotografar exercícios com a câmera.
+  - Tabela de resolução de problemas comuns.
+
+---
+
+## 🧪 4. Resultados da Suíte de Testes Automatizados
+
+Criamos e executamos a suíte de testes em [`tests/test_suite.py`](file:///home/blu/workspace/Projetos/tesla/tests/test_suite.py):
 
 ```text
-[INFO] - HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
-Health test passed: {'status': 'healthy', 'model': 'gemini-3.6-flash'}
+2026-09-16 23:17:47 - HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
+✅ Teste 1: /api/health retornou 200 OK
 
-[INFO] - HTTP Request: GET http://testserver/ "HTTP/1.1 200 OK"
-Index.html serving test passed!
+2026-09-16 23:17:47 - Verificação de /.env, /main.py, /requirements.txt -> 404 Not Found
+✅ Teste 2: Proteção de arquivos confidenciais e estáticos validada com sucesso
 
-[INFO] - HTTP Request: GET http://testserver/style.css "HTTP/1.1 200 OK"
-Style.css serving test passed!
+2026-09-16 23:17:47 - Envio de mensagem com > 5000 caracteres -> 422 Unprocessable Entity
+✅ Teste 3: Validação estrita de limites de payload (Pydantic) funcionando
 
-[INFO] - HTTP Request: GET http://testserver/app.js "HTTP/1.1 200 OK"
-App.js serving test passed!
+2026-09-16 23:17:47 - OPTIONS /api/chat com Origin ngrok -> 200 OK
+✅ Teste 4: Suporte a CORS para subdomínios do ngrok validado
 
-[INFO] - HTTP Request: GET http://testserver/logo.jpg "HTTP/1.1 200 OK"
-Logo.jpg serving test passed!
+⏳ Executando teste de transcrição e explicação multimodal via Gemini...
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent "HTTP/1.1 200 OK"
 
-[INFO] - HTTP Request: GET http://testserver/.env "HTTP/1.1 404 Not Found"
-Security test: /.env is 404 (Protected!)
+--- RESPOSTA OBTIDA DO TUTOR ---
+### 📝 Transcrição da Imagem
 
-[INFO] - HTTP Request: GET http://testserver/main.py "HTTP/1.1 404 Not Found"
-Security test: /main.py is 404 (Protected!)
+Exercício 1: Calcule o valor de $x$ na equação:
 
-[INFO] - HTTP Request: GET http://testserver/requirements.txt "HTTP/1.1 404 Not Found"
-Security test: /requirements.txt is 404 (Protected!)
+$2x + 6 = 14$
 
-ALL AUTOMATED TESTS PASSED SUCCESSFULLY!
+Justifique sua resposta passo a passo.
+
+---
+
+### 💡 Explicação
+
+Para resolver a equação $2x + 6 = 14$, o primeiro passo é isolar o termo que contém a letra $x$. Você deve subtrair $6$ de ambos os lados da igualdade, obtendo $2x = 14 - 6$, o que resulta em $2x = 8$.
+
+O segundo passo é encontrar o valor unitário de $x$ dividindo o número...
+---------------------------------
+
+✅ Teste 5: Transcrição de imagem com LaTeX e explicação estruturada validada com sucesso!
+
+🎉 TODOS OS TESTES PASSARAM COM SUCESSO!
 ```

@@ -52,19 +52,23 @@ Suas diretrizes de comunicação são fundamentais e devem ser seguidas com rigo
 1. Comunicação Literal e Objetiva: Utilize linguagem clara, direta, concreta e sem ambiguidades. Evite sarcasmo, ironia, expressões de duplo sentido, metáforas complexas e figuras de linguagem.
 2. Tom de Voz: Seja acolhedor, altamente paciente e mantenha baixa verbosidade (vá direto ao ponto sem enrolação).
 3. Adaptação a Hiperfoco: Se um tema de hiperfoco for informado no contexto da mensagem, use analogias e exemplos estritamente ligados a esse tema para facilitar o aprendizado. Se não for informado, explique de forma simples e direta.
-4. ESTRUTURA DE RESPOSTA OBRIGATÓRIA:
-   - Toda resposta deve ser composta inicialmente por EXATAMENTE DOIS (2) PARÁGRAFOS CURTOS com a explicação conceitual.
+4. ESTRUTURA DE RESPOSTA OBRIGATÓRIA PARA EXPLICAÇÕES:
+   - Toda explicação conceitual deve ser composta inicialmente por EXATAMENTE DOIS (2) PARÁGRAFOS CURTOS.
    - Imediatamente após os dois parágrafos, inclua um resumo final contendo EXATAMENTE TRÊS (3) BULLET POINTS (utilizando '-') destacando os pontos principais.
-   - EXCEÇÃO: essa estrutura de 2 parágrafos + 3 bullets NÃO se aplica ao transcrever uma imagem (ver regra 6). Ela volta a valer normalmente para qualquer explicação que você adicionar depois da transcrição.
 5. Fórmulas e Notação Matemática: Sempre que apresentar fórmulas, equações ou símbolos matemáticos e científicos, use notação LaTeX padrão:
    - Fórmulas inline (no meio da frase): use delimitadores `$ ... $` (exemplo: `$E = mc^2$`).
    - Equações em bloco (destaque em linha separada): use delimitadores `$$ ... $$` (exemplo: `$$x = \frac{-b \pm \sqrt{\Delta}}{2a}$$`).
    - Não use blocos de código markdown (como ```latex ou ```math) para renderizar fórmulas matemáticas; utilize diretamente os delimitadores $ ou $$.
-6. Transcrição de Imagens: Se o aluno enviar uma imagem contendo texto (página de livro, exercício, anotação, etc.):
-   - Primeiro, transcreva o texto da imagem literalmente, preservando a formatação original o máximo possível (quebras de linha, listas, e fórmulas matemáticas em LaTeX conforme a regra 5).
-   - Não corrija, resuma ou reescreva o conteúdo transcrito — o objetivo é reproduzir fielmente o que está escrito, apenas em um formato mais fácil de ler.
-   - Se o texto da imagem estiver ilegível ou não houver texto identificável, diga isso de forma direta em vez de inventar conteúdo.
-   - Só depois da transcrição, e apenas se o aluno tiver pedido uma explicação, adicione o conteúdo explicativo seguindo a estrutura da regra 4.
+6. Transcrição e Análise de Imagens (OCR / Fotos de Exercícios):
+   Se o aluno enviar uma imagem contendo texto ou fórmulas (página de livro, exercício, anotação ou lousa):
+   - Inicie OBRIGATORIAMENTE com o cabeçalho:
+     ### 📝 Transcrição da Imagem
+   - Transcreva todo o conteúdo visível de forma literal e fiel, mantendo quebras de linha e formatando fórmulas matemáticas em LaTeX conforme a regra 5.
+   - Se a imagem estiver ilegível, borrada ou sem texto identificável, escreva apenas: "Não foi possível ler o texto com clareza nesta imagem. Tente enviar uma foto mais nítida ou aproximada."
+   - Se o aluno NÃO fez uma pergunta e enviou apenas a foto (ou pediu apenas transcrição), finalize aqui sem explicações extras.
+   - Se o aluno FEZ uma pergunta ou pediu para resolver/explicar o conteúdo da imagem, adicione um separador `---` e o cabeçalho:
+     ### 💡 Explicação
+     Em seguida, desenvolva a explicação pedagógica seguindo com rigor a estrutura da regra 4 (exatamente 2 parágrafos curtos + 3 tópicos com '-').
 """
 
 # Configuração de geração (temperatura baixa = respostas mais literais e determinísticas)
@@ -107,13 +111,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configuração de CORS para permitir requisições do Front-end
+# Configuração de CORS para permitir requisições do Front-end (incluindo domínios dinâmicos do ngrok)
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 origins = [origin.strip() for origin in ALLOWED_ORIGINS if origin.strip()]
 is_wildcard = "*" in origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"https://.*\.ngrok-free\.(app|dev)|https://.*\.ngrok\.io",
     allow_credentials=not is_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -129,13 +134,19 @@ class RoleEnum(str, Enum):
 
 class ChatMessage(BaseModel):
     role: RoleEnum = Field(..., description="Papel de quem enviou a mensagem: 'user', 'model' ou 'assistant'")
-    content: str = Field(..., min_length=1, description="Texto da mensagem")
+    content: str = Field(..., min_length=1, max_length=5000, description="Texto da mensagem")
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, description="Pergunta ou dúvida atual do estudante.")
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=5000,
+        description="Pergunta ou dúvida atual do estudante (máx. 5000 caracteres)."
+    )
     hiperfoco: Optional[str] = Field(
         default=None,
-        description="Tema de interesse especial/hiperfoco do estudante para personalização de analogias."
+        max_length=150,
+        description="Tema de interesse especial/hiperfoco do estudante para personalização de analogias (máx. 150 caracteres)."
     )
     history: Optional[List[ChatMessage]] = Field(
         default_factory=list,
@@ -143,10 +154,12 @@ class ChatRequest(BaseModel):
     )
     image_base64: Optional[str] = Field(
         default=None,
-        description="Imagem anexada pelo aluno (ex.: foto de um exercício), codificada em base64."
+        max_length=15 * 1024 * 1024,
+        description="Imagem anexada pelo aluno (ex.: foto de um exercício), codificada em base64 (máx. ~11MB brutos)."
     )
     image_mime_type: Optional[str] = Field(
         default=None,
+        max_length=50,
         description="Tipo MIME da imagem anexada, ex.: 'image/jpeg', 'image/png', 'image/webp'."
     )
 

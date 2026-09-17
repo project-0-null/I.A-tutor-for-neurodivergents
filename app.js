@@ -12,9 +12,31 @@
   /* ------------------------------------------------------------------------
    * Configuração
    * ---------------------------------------------------------------------- */
-  const API_URL = (window.location.protocol.startsWith('http') && (window.location.port === '8000' || window.location.pathname.startsWith('/api')))
-    ? '/api/chat'
-    : 'https://commuting-sixth-tiling.ngrok-free.dev/api/chat';
+  // Detecção inteligente de URL:
+  // 1. Se estiver na mesma porta (8000) ou servido diretamente via ngrok, usa '/api/chat' relativo.
+  // 2. Se aberto via Live Server (porta 5500, 3000, etc.) em localhost, conecta ao backend em http://localhost:8000/api/chat.
+  // 3. Suporta URL personalizada salva no localStorage ('tutor_custom_api_url') caso desejado.
+  const API_URL = (() => {
+    const customUrl = localStorage.getItem('tutor_custom_api_url');
+    if (customUrl && customUrl.trim()) {
+      return customUrl.trim().replace(/\/+$/, '') + '/api/chat';
+    }
+    if (window.location.protocol.startsWith('http')) {
+      if (
+        window.location.port === '8000' ||
+        window.location.pathname.startsWith('/api') ||
+        window.location.hostname.endsWith('.ngrok-free.app') ||
+        window.location.hostname.endsWith('.ngrok-free.dev') ||
+        window.location.hostname.endsWith('.ngrok.io')
+      ) {
+        return '/api/chat';
+      }
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return 'http://localhost:8000/api/chat';
+      }
+    }
+    return '/api/chat';
+  })();
   const STORAGE_KEY = 'tutorA11y.prefs.v1';
   const MAX_HISTORY_MESSAGES = 20; // limite de mensagens enviadas no campo "history"
   const FONT_SCALE_STEPS = [0.9, 1, 1.1, 1.2, 1.3];
@@ -612,7 +634,10 @@
     try {
       response = await fetch(API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
         body: JSON.stringify(payload),
       });
     } catch (networkErr) {
@@ -698,6 +723,81 @@
     });
   }
 
+  /**
+   * Otimiza fotos de câmeras de celular (geralmente de 10 MB a 25 MB) usando a API nativa
+   * Canvas do navegador. Redimensiona para no máximo 1920px mantendo nitidez para OCR e
+   * gerando um arquivo de ~500 KB a 1.2 MB.
+   */
+  async function compressImageIfNeeded(file, maxDimension = 1920, quality = 0.88) {
+    // Se o arquivo for pequeno (< 2.5 MB), envia direto sem recompressão
+    if (file.size <= 2.5 * 1024 * 1024) {
+      return file;
+    }
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        let { width, height } = img;
+
+        if (!width || !height) {
+          resolve(file);
+          return;
+        }
+
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(file);
+          return;
+        }
+
+        // Fundo branco limpo para fórmulas e enunciados
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob && blob.size < file.size) {
+              const newFileName = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+              const optimized = new File([blob], newFileName, {
+                type: 'image/jpeg',
+                lastModified: Date.now(),
+              });
+              resolve(optimized);
+            } else {
+              resolve(file);
+            }
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(file);
+      };
+
+      img.src = objectUrl;
+    });
+  }
+
   function showImageError(message) {
     dom.imageError.textContent = message;
     dom.imageError.hidden = false;
@@ -734,21 +834,29 @@
       return;
     }
 
-    if (file.size > MAX_IMAGE_BYTES) {
-      showImageError(`Imagem muito grande. O tamanho máximo é ${Math.round(MAX_IMAGE_BYTES / (1024 * 1024))} MB.`);
+    // Auto-compressão preventiva para fotos pesadas de celulares
+    let processedFile = file;
+    try {
+      processedFile = await compressImageIfNeeded(file);
+    } catch (compressErr) {
+      console.warn('Otimização de imagem não concluída, prosseguindo com original:', compressErr);
+    }
+
+    if (processedFile.size > MAX_IMAGE_BYTES) {
+      showImageError(`Imagem muito grande (${Math.round(processedFile.size / (1024 * 1024))} MB). O limite é ${Math.round(MAX_IMAGE_BYTES / (1024 * 1024))} MB.`);
       dom.campoImagem.value = '';
       return;
     }
 
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const dataUrl = await readFileAsDataUrl(processedFile);
       const base64 = String(dataUrl).split(',', 2)[1] || '';
       if (!base64) throw new Error('Não foi possível ler os dados da imagem.');
 
       attachedImage = {
         base64,
-        mimeType: file.type,
-        name: file.name || 'imagem',
+        mimeType: processedFile.type,
+        name: processedFile.name || 'imagem',
         dataUrl,
       };
       showImagePreview();
