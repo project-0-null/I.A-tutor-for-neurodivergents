@@ -52,15 +52,30 @@
         </div>
       </div>
 
-      <button
-        type="button"
-        id="btn-modo-simples"
-        class="switch-btn"
-        aria-pressed="false"
-      >
-        <span class="switch-btn__track" aria-hidden="true"><span class="switch-btn__thumb"></span></span>
-        <span class="switch-btn__label">Modo simples</span>
-      </button>
+      <div class="app-header__actions">
+        <button
+          type="button"
+          id="btn-limpar-chat"
+          class="header-btn"
+          aria-label="Limpar conversa e começar do zero"
+          title="Limpar conversa"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12z"/>
+          </svg>
+          <span>Limpar conversa</span>
+        </button>
+
+        <button
+          type="button"
+          id="btn-modo-simples"
+          class="switch-btn"
+          aria-pressed="false"
+        >
+          <span class="switch-btn__track" aria-hidden="true"><span class="switch-btn__thumb"></span></span>
+          <span class="switch-btn__label">Modo simples</span>
+        </button>
+      </div>
     </header>
 
     <div class="app-body">
@@ -180,12 +195,12 @@
           </div>
         </section>
 
-        <!-- Ações rápidas de pergunta -->
-        <div class="quick-prompts" role="group" aria-label="Perguntas rápidas">
-          <button type="button" class="chip-btn" data-prompt="simplificar">Simplifique a explicação</button>
-          <button type="button" class="chip-btn" data-prompt="exemplo">Dê um exemplo prático</button>
-          <button type="button" class="chip-btn" data-prompt="resumo">Resuma em tópicos</button>
-          <button type="button" class="chip-btn" data-prompt="passo-a-passo">Explique passo a passo</button>
+        <!-- Ações rápidas de pergunta (começam ocultas até o tutor responder à primeira mensagem) -->
+        <div id="quick-prompts" class="quick-prompts" role="group" aria-label="Perguntas rápidas" hidden>
+          <button type="button" class="chip-btn" data-prompt="simplificar" tabindex="-1" aria-hidden="true">Simplifique a explicação</button>
+          <button type="button" class="chip-btn" data-prompt="exemplo" tabindex="-1" aria-hidden="true">Dê um exemplo prático</button>
+          <button type="button" class="chip-btn" data-prompt="resumo" tabindex="-1" aria-hidden="true">Resuma em tópicos</button>
+          <button type="button" class="chip-btn" data-prompt="passo-a-passo" tabindex="-1" aria-hidden="true">Explique passo a passo</button>
         </div>
 
         <!-- Entrada de texto -->

@@ -241,41 +241,64 @@ async def generate_content_with_retry(
                 config=config,
             )
         except genai_errors.APIError as e:
-            status_code = getattr(e, "code", None) or getattr(e, "status_code", None) or 500
+            raw_code = getattr(e, "code", None) or getattr(e, "status_code", None)
+            try:
+                status_code = int(raw_code) if raw_code is not None else 500
+            except (ValueError, TypeError):
+                status_code = 500
 
-            # Se o servidor do Google acusar 503 (alta demanda) ou 504 (timeout) e temos um modelo de fallback,
-            # alternamos para o fallback para não deixar o usuário esperando.
-            if (
-                status_code in {500, 502, 503, 504}
-                and fallback_model
-                and not used_fallback
-                and fallback_model != current_model
-            ):
+            err_msg = str(e).lower()
+            is_not_found = (
+                status_code == 404
+                or "404" in err_msg
+                or "not_found" in err_msg
+                or "not found" in err_msg
+            )
+            can_fallback = bool(fallback_model and not used_fallback and fallback_model != current_model)
+
+            # Chaveia imediatamente para o modelo de fallback caso ocorra:
+            # - 404 / NOT_FOUND (modelo não encontrado / depreciado na versão da API)
+            # - 500, 502, 503, 504 (alta demanda / indisponibilidade do Google)
+            # - Outros erros de API não passíveis de retry
+            if can_fallback and (is_not_found or status_code in {404, 500, 502, 503, 504} or status_code not in RETRYABLE_STATUS_CODES):
                 logger.warning(
-                    f"Modelo principal '{current_model}' retornou status {status_code} (alta demanda/indisponibilidade). "
-                    f"Acionando imediatamente o modelo de fallback '{fallback_model}'..."
+                    f"Modelo principal '{current_model}' falhou com status {status_code}: {str(e)}. "
+                    f"Chaveando imediatamente para o modelo de fallback '{fallback_model}'..."
                 )
                 current_model = fallback_model
                 used_fallback = True
                 attempt = 0
                 continue
 
-            if status_code not in RETRYABLE_STATUS_CODES or attempt >= MAX_RETRIES:
-                if attempt > 0 or used_fallback:
-                    logger.error(
-                        f"Falha na API no modelo '{current_model}' após {attempt} retentativa(s) (status {status_code}): {str(e)}"
-                    )
-                raise
+            # Se for um erro transitório (ex.: 429) e ainda houver retentativas
+            if status_code in RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES:
+                attempt += 1
+                delay = min(RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1)), RETRY_MAX_DELAY_SECONDS)
+                delay += random.uniform(0, RETRY_JITTER_SECONDS)
 
-            attempt += 1
-            delay = min(RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1)), RETRY_MAX_DELAY_SECONDS)
-            delay += random.uniform(0, RETRY_JITTER_SECONDS)
+                logger.warning(
+                    f"Erro transitório do Gemini no modelo '{current_model}' (status {status_code}). "
+                    f"Retentativa {attempt}/{MAX_RETRIES} em {delay:.1f}s. Detalhe: {str(e)}"
+                )
+                await asyncio.sleep(delay)
+                continue
 
-            logger.warning(
-                f"Erro transitório do Gemini no modelo '{current_model}' (status {status_code}). "
-                f"Retentativa {attempt}/{MAX_RETRIES} em {delay:.1f}s. Detalhe: {str(e)}"
-            )
-            await asyncio.sleep(delay)
+            # Se esgotou os retries no modelo principal mas o fallback ainda está disponível
+            if can_fallback:
+                logger.warning(
+                    f"Modelo principal '{current_model}' esgotou as {attempt} retentativas (status {status_code}). "
+                    f"Tentando agora o modelo de fallback '{fallback_model}'..."
+                )
+                current_model = fallback_model
+                used_fallback = True
+                attempt = 0
+                continue
+
+            if attempt > 0 or used_fallback:
+                logger.error(
+                    f"Falha na API no modelo '{current_model}' após {attempt} retentativa(s) (status {status_code}): {str(e)}"
+                )
+            raise
 
 
 # -----------------------------------------------------------------------------
@@ -303,33 +326,50 @@ async def chat_endpoint(payload: ChatRequest):
         
         # Inicia o texto apenas com a dúvida real do aluno
         user_text = payload.message.strip()
-        
-        # Adiciona o hiperfoco no final, como uma instrução secundária, para não confundir a visão do modelo
-        if cleaned_hiperfoco:
-            user_text += f"\n\n[Instrução interna: o aluno tem hiperfoco em {cleaned_hiperfoco}. Use analogias com isso se for explicar algo.]"
 
         # --- Imagem Anexada (opcional) ---
         image_bytes: Optional[bytes] = None
         if payload.image_base64:
             image_bytes = decode_and_validate_image(payload.image_base64, payload.image_mime_type)
 
+        if not user_text:
+            if image_bytes is not None:
+                user_text = "Transcreva o texto desta imagem."
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A pergunta não pode estar vazia.",
+                )
+        
+        # Adiciona o hiperfoco no final, como uma instrução secundária, para não confundir a visão do modelo
+        if cleaned_hiperfoco:
+            user_text += f"\n\n[Instrução interna: o aluno tem hiperfoco em {cleaned_hiperfoco}. Use analogias com isso se for explicar algo.]"
+
         # --- Montagem e Limitação do Histórico de Conversa ---
         MAX_HISTORY_ITEMS = 6
-        raw_history = payload.history[-MAX_HISTORY_ITEMS:] if payload.history else []
+        raw_history = list(payload.history[-MAX_HISTORY_ITEMS:]) if payload.history else []
+
+        # Descarta mensagens iniciais que não sejam do usuário (evita erro da API Gemini ao iniciar com 'model')
+        while raw_history and raw_history[0].role != RoleEnum.USER:
+            raw_history.pop(0)
 
         gemini_contents: List[genai_types.Content] = []
         last_role = None
 
         for item in raw_history:
+            content_text = item.content.strip()
+            if not content_text:
+                continue
+
             role = "user" if item.role == RoleEnum.USER else "model"
             if role == last_role and gemini_contents:
                 gemini_contents[-1] = genai_types.Content(
                     role=role,
-                    parts=list(gemini_contents[-1].parts) + [genai_types.Part.from_text(text=item.content)],
+                    parts=list(gemini_contents[-1].parts) + [genai_types.Part.from_text(text=content_text)],
                 )
             else:
                 gemini_contents.append(
-                    genai_types.Content(role=role, parts=[genai_types.Part.from_text(text=item.content)])
+                    genai_types.Content(role=role, parts=[genai_types.Part.from_text(text=content_text)])
                 )
                 last_role = role
 
@@ -350,6 +390,10 @@ async def chat_endpoint(payload: ChatRequest):
         else:
             gemini_contents.append(genai_types.Content(role="user", parts=current_parts))
 
+        # Garantia final de sanitização: a lista enviada ao Gemini deve sempre iniciar com role 'user'
+        while gemini_contents and gemini_contents[0].role != "user":
+            gemini_contents.pop(0)
+
         logger.info(
             f"Processando requisição. Turnos válidos: {len(gemini_contents)} | "
             f"Hiperfoco: {'Sim (' + cleaned_hiperfoco + ')' if cleaned_hiperfoco else 'Não informado'} | "
@@ -357,7 +401,7 @@ async def chat_endpoint(payload: ChatRequest):
         )
 
         # --- Chamada Assíncrona ao Modelo Gemini (sem travar o event loop do FastAPI) ---
-        # Com retry automático e fallback para erros transitórios (503 / 429)
+        # Com retry automático e fallback para erros transitórios (503 / 429) e 404
         gemini_response = await generate_content_with_retry(
             model=MODEL_NAME,
             contents=gemini_contents,
@@ -377,11 +421,14 @@ async def chat_endpoint(payload: ChatRequest):
             try:
                 for candidate in gemini_response.candidates:
                     if candidate.content and candidate.content.parts:
-                        extracted = "".join(
-                            getattr(part, "text", "") for part in candidate.content.parts if getattr(part, "text", None)
-                        )
-                        if extracted.strip():
-                            reply_text = extracted.strip()
+                        parts_text = [
+                            getattr(part, "text", "")
+                            for part in candidate.content.parts
+                            if getattr(part, "text", None)
+                        ]
+                        extracted = "".join(parts_text).strip()
+                        if extracted:
+                            reply_text = extracted
                             break
             except Exception:
                 pass
@@ -389,18 +436,41 @@ async def chat_endpoint(payload: ChatRequest):
         if not reply_text:
             # Resposta vazia ou bloqueada por moderação/segurança
             finish_reason = None
+            prompt_blocked = False
+
+            # Verifica bloqueio a nível de prompt (prompt_feedback)
             try:
-                finish_reason = gemini_response.candidates[0].finish_reason
-                finish_reason = getattr(finish_reason, "name", finish_reason)
+                p_feedback = getattr(gemini_response, "prompt_feedback", None)
+                if p_feedback and getattr(p_feedback, "block_reason", None):
+                    p_reason = getattr(p_feedback.block_reason, "name", str(p_feedback.block_reason)).upper()
+                    if any(s in p_reason for s in ("SAFETY", "BLOCKLIST", "PROHIBITED", "SPII")):
+                        prompt_blocked = True
+                        logger.warning(f"Prompt bloqueado por moderação. Motivo: {p_reason}")
+            except Exception:
+                pass
+
+            try:
+                if getattr(gemini_response, "candidates", None) and gemini_response.candidates:
+                    raw_finish = gemini_response.candidates[0].finish_reason
+                    finish_reason = getattr(raw_finish, "name", str(raw_finish)).upper()
+                    if "." in finish_reason:
+                        finish_reason = finish_reason.split(".")[-1]
             except (AttributeError, IndexError, TypeError):
                 pass
 
-            if finish_reason:
-                logger.warning(f"Resposta filtrada ou vazia. Motivo: {finish_reason}")
+            # Falso alarme de segurança evitado: finish_reason == 'STOP' é término natural, NÃO moderação.
+            # Motivos reais de moderação/segurança no Gemini: SAFETY, BLOCKLIST, PROHIBITED_CONTENT, SPII, RECITATION
+            safety_reasons = {"SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "RECITATION"}
+            is_safety_block = prompt_blocked or (finish_reason in safety_reasons)
+
+            if is_safety_block:
+                logger.warning(f"Resposta bloqueada por moderação/segurança. Motivo: {finish_reason or 'PROMPT_FEEDBACK'}")
                 reply_text = (
                     "Não consegui responder a essa pergunta específica devido às diretrizes de segurança e conteúdo. "
                     "Podemos tentar formular de outro jeito?"
                 )
+            elif finish_reason:
+                logger.warning(f"Resposta vazia da API do Gemini. Motivo de finalização: {finish_reason}")
 
         if not reply_text:
             raise HTTPException(

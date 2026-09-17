@@ -1,99 +1,56 @@
-# 🚀 Walkthrough: Segurança, Transcrição Fiel de Imagens e Guia do Ngrok
+# 🚀 Walkthrough: Persistência Local, UX Acolhedora e Robustez no LLM
 
-Concluímos com sucesso as três frentes prioritárias aprovadas: **Segurança e Proteção de Segredos**, **Aprimoramento e Validação da Transcrição de Imagens (OCR com LaTeX)** e a criação do **Guia Oficial de Uso do Ngrok**.
-
----
-
-## 🛡️ 1. Segurança e Prevenção de Falhas
-
-### Proteção de Segredos no Docker e Git
-- **`.dockerignore`**: Adicionados `.env` e `.env.*` para garantir que arquivos de variáveis de ambiente com credenciais de API nunca sejam embutidos acidentalmente em imagens Docker.
-- **`.gitignore`**: Criado arquivo oficial e versionado cobrindo ambientes virtuais (`tesla/`, `venv/`), arquivos de ambiente (`.env`), caches Python (`__pycache__`, `*.pyc`), caches de teste e configurações de IDEs.
-
-### Blindagem de Payloads no Backend (`main.py`)
-- Aplicadas validações Pydantic de comprimento máximo (`max_length`):
-  - `message`: máx. 5000 caracteres (evita estouro de memória e DoS).
-  - `hiperfoco`: máx. 150 caracteres.
-  - `image_base64`: máx. ~11MB brutos.
-- **CORS para Ngrok**: Inserida regra regex `allow_origin_regex=r"https://.*\.ngrok-free\.(app|dev)|https://.*\.ngrok\.io"` permitindo que novos túneis do ngrok funcionem imediatamente sem necessidade de alterar o arquivo `.env` manualmente a cada sessão.
+Concluímos a implementação de todas as melhorias acordadas para tornar o **Tutor Educacional Inclusivo** mais resiliente, acolhedor e intuitivo para estudantes neurodivergentes.
 
 ---
 
-## 📝 2. Transcrição Fiel de Imagens e Auto-Compressão
+## 🛠️ O que foi Implementado
 
-### Prompt Estruturado no Gemini (`main.py`)
-- A instrução do sistema (`SYSTEM_INSTRUCTION`) foi refinada para separar de forma visualmente previsível a transcrição da explicação pedagógica:
-  ```markdown
-  ### 📝 Transcrição da Imagem
-  [Texto fiel e literal com fórmulas em notação LaTeX $ ou $$]
+### 1. 💾 Persistência de Conversa Local (`localStorage`) & Botão Limpar
+- **Zero Banco de Dados, Zero Custo**: O histórico de mensagens é persistido de forma segura no próprio navegador sob a chave `tutorA11y.chatLog.v1`.
+- **Restauração Automática**: Ao recarregar a página (F5) ou reabrir no smartphone, todo o histórico anterior reaparece formatado, com fórmulas KaTeX e scroll ajustado.
+- **Botão "Limpar conversa"**: Localizado no cabeçalho ao lado de "Modo simples", permite ao aluno reiniciar a sessão a qualquer momento.
+- **Cancelamento Atômico**: Se o aluno clicar em limpar enquanto o tutor está gerando uma resposta, o `AbortController` cancela a requisição na hora, impedindo respostas "fantasmas" no chat limpo.
 
-  ---
-  ### 💡 Explicação
-  [2 parágrafos curtos conceituais + 3 bullet points com os pontos-chave]
-  ```
-- Se o aluno enviar apenas a foto (ou pedir apenas para transcrever), o tutor não gera explicações redundantes, focando na transcrição limpa.
+### 2. 🎈 Ações Rápidas com Efeito "Pop" Suave
+- **Bloqueio no Início**: Enquanto a conversa estiver vazia, os botões rápidos (*"Simplifique"*, *"Dê um exemplo"*, etc.) ficam ocultos e inativos (`hidden`, `aria-hidden="true"`), evitando perguntas desconexas sem contexto anterior.
+- **Efeito Pop Suave**: Assim que o tutor responde à primeira dúvida do aluno, os chips surgem com uma animação elegante de escala e elevação (`@keyframes chipPop`), convidando o aluno a aprofundar o tema.
+- **Sem Animações Repetitivas**: Em perguntas posteriores, os chips permanecem visíveis sem repetição de animações para não gerar distração sensorial.
 
-### Auto-Compressão de Fotos no Front-end (`app.js`)
-- Criada a função `compressImageIfNeeded(file)`: fotos tiradas por câmeras de smartphones (que costumam ter entre 10 MB e 25 MB) são redimensionadas via `<canvas>` para no máximo 1920px mantendo nitidez impecável para OCR e reduzindo o peso para ~500 KB a 1.2 MB.
-- Isso elimina o erro `HTTP 413 Request Entity Too Large` e garante envio quase instantâneo mesmo em conexões móveis.
+### 3. 📝 Parser de Markdown Semântico
+- **Títulos Limpos**: Marcações como `### 📝 Transcrição da Imagem` e `### 💡 Explicação` agora são convertidas para títulos destacados `<h3>`, estilizados para modo claro, escuro anti-halo e alto contraste.
+- **Linhas Divisórias Reais**: Marcações `---` ou `- - -` são transformadas na classe `.message__divider`, organizando visualmente onde termina a transcrição e onde começa a explicação.
+- **Proteção do KaTeX em Código**: Fórmulas matemáticas dentro de blocos de código (`pre` e `code`) não sofrem interferência do renderizador KaTeX.
 
----
-
-## 🌐 3. Suporte Completo e Guia do Ngrok
-
-### Cabeçalho Anti-Warning no Front-end (`app.js`)
-- Adicionado o cabeçalho `'ngrok-skip-browser-warning': 'true'` nas chamadas `fetch()`. O ngrok gratuito não interceptará mais as chamadas da API com sua tela HTML de aviso.
-- A constante `API_URL` agora detecta automaticamente o ambiente (seja porta 8000, Live Server em localhost ou túnel ngrok), eliminando a URL temporária antiga que estava travada no código.
-
-### Documentação Didática (`COMO_USAR_NGROK.md`)
-- Criado o arquivo [`COMO_USAR_NGROK.md`](file:///home/blu/workspace/Projetos/tesla/COMO_USAR_NGROK.md) com:
-  - Instruções de instalação (Linux, Windows, Mac).
-  - Configuração do authtoken gratuito.
-  - Como rodar `ngrok http 8000`.
-  - Como acessar direto pelo celular e fotografar exercícios com a câmera.
-  - Tabela de resolução de problemas comuns.
+### 4. 🧠 Robustez na Integração com o Gemini (`main.py`)
+- **Fallback Ampliado**: O sistema agora chaveia imediatamente para o modelo reserva (`gemini-flash-latest`) se o modelo principal retornar erro `404` (modelo renomeado ou descontinuado), além dos erros de sobrecarga `500, 502, 503, 504`.
+- **Fim dos Falsos Alarmes de Moderação**: Respostas concluídas normalmente com `finish_reason = FinishReason.STOP` não acionam mais avisos indevidos de diretrizes de segurança.
+- **Sanitização de Turno Inicial**: Se um histórico fatiado começar com resposta do assistente (`model`), o backend descarta automaticamente até a primeira mensagem do `user`, eliminando o erro HTTP 400 da API do Google.
+- **Fallback Textual para Fotos**: Enviar fotos sem texto gera automaticamente o prompt de transcrição segura, evitando o erro de partes de texto vazias.
 
 ---
 
-## 🧪 4. Resultados da Suíte de Testes Automatizados
+## 🧪 Resultados dos Testes Automatizados
 
-Criamos e executamos a suíte de testes em [`tests/test_suite.py`](file:///home/blu/workspace/Projetos/tesla/tests/test_suite.py):
+Executamos a suíte de testes completa com o `pytest`:
 
 ```text
-2026-09-16 23:17:47 - HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
-✅ Teste 1: /api/health retornou 200 OK
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0
+plugins: asyncio-1.4.0, anyio-4.14.2
 
-2026-09-16 23:17:47 - Verificação de /.env, /main.py, /requirements.txt -> 404 Not Found
-✅ Teste 2: Proteção de arquivos confidenciais e estáticos validada com sucesso
+test_validation.py::test_fallback_on_404_model_not_found PASSED          [ 10%]
+test_validation.py::test_fallback_on_503_service_unavailable PASSED      [ 20%]
+test_validation.py::test_finish_reason_stop_does_not_trigger_safety_warning PASSED [ 30%]
+test_validation.py::test_genuine_safety_block_triggers_helpful_warning PASSED [ 40%]
+test_validation.py::test_history_sanitization_leading_model_dropped PASSED [ 50%]
+test_validation.py::test_empty_message_rejected_with_400 PASSED          [ 60%]
+tests/test_suite.py::test_health PASSED                                  [ 70%]
+tests/test_suite.py::test_security_static_routes PASSED                  [ 80%]
+tests/test_suite.py::test_payload_validation PASSED                      [ 90%]
+tests/test_suite.py::test_cors_ngrok_support PASSED                      [100%]
 
-2026-09-16 23:17:47 - Envio de mensagem com > 5000 caracteres -> 422 Unprocessable Entity
-✅ Teste 3: Validação estrita de limites de payload (Pydantic) funcionando
-
-2026-09-16 23:17:47 - OPTIONS /api/chat com Origin ngrok -> 200 OK
-✅ Teste 4: Suporte a CORS para subdomínios do ngrok validado
-
-⏳ Executando teste de transcrição e explicação multimodal via Gemini...
-POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent "HTTP/1.1 200 OK"
-
---- RESPOSTA OBTIDA DO TUTOR ---
-### 📝 Transcrição da Imagem
-
-Exercício 1: Calcule o valor de $x$ na equação:
-
-$2x + 6 = 14$
-
-Justifique sua resposta passo a passo.
-
----
-
-### 💡 Explicação
-
-Para resolver a equação $2x + 6 = 14$, o primeiro passo é isolar o termo que contém a letra $x$. Você deve subtrair $6$ de ambos os lados da igualdade, obtendo $2x = 14 - 6$, o que resulta em $2x = 8$.
-
-O segundo passo é encontrar o valor unitário de $x$ dividindo o número...
----------------------------------
-
-✅ Teste 5: Transcrição de imagem com LaTeX e explicação estruturada validada com sucesso!
-
-🎉 TODOS OS TESTES PASSARAM COM SUCESSO!
+======================== 10 passed, 1 warning in 1.84s =========================
 ```
+
+Todos os 10 testes passaram com 100% de sucesso.

@@ -38,6 +38,7 @@
     return '/api/chat';
   })();
   const STORAGE_KEY = 'tutorA11y.prefs.v1';
+  const CHAT_STORAGE_KEY = 'tutorA11y.chat.v1';
   const MAX_HISTORY_MESSAGES = 20; // limite de mensagens enviadas no campo "history"
   const FONT_SCALE_STEPS = [0.9, 1, 1.1, 1.2, 1.3];
 
@@ -61,6 +62,7 @@
     statusAnnouncer: document.getElementById('status-announcer'),
 
     btnModoSimples: document.getElementById('btn-modo-simples'),
+    btnLimparChat: document.getElementById('btn-limpar-chat'),
 
     campoHiperfoco: document.getElementById('campo-hiperfoco'),
 
@@ -78,6 +80,7 @@
     btnSimplificarAgora: document.getElementById('btn-simplificar-agora'),
 
     chatLog: document.getElementById('chat-log'),
+    quickPrompts: document.getElementById('quick-prompts'),
     quickPromptButtons: Array.from(document.querySelectorAll('.chip-btn[data-prompt]')),
 
     form: document.getElementById('chat-form'),
@@ -100,8 +103,14 @@
   /** Histórico da conversa, mantido em memória e enviado a cada requisição. */
   let conversationHistory = [];
 
+  /** Mensagens completas salvas localmente para persistência (Opção A). */
+  let savedChatMessages = [];
+
   /** Imagem anexada e ainda não enviada: { base64, mimeType, name, dataUrl } | null. */
   let attachedImage = null;
+
+  /** Controlador de requisição ativa para cancelamento seguro ao limpar o chat. */
+  let currentAbortController = null;
 
   /** Preferências de acessibilidade, persistidas em localStorage entre sessões. */
   let prefs = {
@@ -334,7 +343,7 @@
   function formatMessageToHtml(rawText) {
     // 1. Extrai blocos de código com cercas (```...```) para preservar indentação e quebras
     const codeBlocks = [];
-    let workingText = String(rawText).replace(/```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)```/g, (_, lang, code) => {
+    let workingText = String(rawText).replace(/```([a-zA-Z0-9_ -]*)\r?\n([\s\S]*?)```/g, (_, lang, code) => {
       codeBlocks.push({ lang, code });
       return `@@CODEBLOCK${codeBlocks.length - 1}@@`;
     });
@@ -383,6 +392,31 @@
       if (codeMatch) {
         flushList();
         htmlParts.push(trimmed);
+        return;
+      }
+
+      // Bloco de fórmula LaTeX isolado
+      const mathMatch = /^@@MATHBLOCK(\d+)@@$/.exec(trimmed);
+      if (mathMatch) {
+        flushList();
+        htmlParts.push(trimmed);
+        return;
+      }
+
+      // Linha divisória em markdown: --- ou *** ou ___ (3 ou mais caracteres, suportando espaços como '- - -')
+      if (/^(?:-{3,}|\*{3,}|_{3,}|(?:-\s*){3,}|(?:\*\s*){3,})$/.test(trimmed)) {
+        flushList();
+        htmlParts.push('<hr class="message__divider">');
+        return;
+      }
+
+      // Cabeçalhos / Títulos em markdown (##, ### etc.) -> tags <h3> limpas
+      const headingMatch = /^#{1,4}\s+(.*)$/.exec(trimmed);
+      if (headingMatch) {
+        flushList();
+        const cleanHeading = headingMatch[1].replace(/\s+#+\s*$/, '').trim();
+        const headingContent = applyInlineFormatting(escapeHtml(cleanHeading));
+        htmlParts.push(`<h3>${headingContent}</h3>`);
         return;
       }
 
@@ -451,7 +485,7 @@
       window.renderMathInElement(element, {
         delimiters: MATH_DELIMITERS,
         throwOnError: false, // fórmula malformada vira um aviso discreto, não quebra a página
-        ignoredTags: ['script', 'noscript', 'style', 'textarea'],
+        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'annotation'],
       });
     } catch (err) {
       console.warn('Não foi possível renderizar uma fórmula LaTeX:', err);
@@ -499,21 +533,205 @@
     return { wrapper, plainTextForHistory };
   }
 
-  function appendUserMessage(text, imageDataUrl) {
+  /* ------------------------------------------------------------------------
+   * Persistência de Conversa (Opção A - localStorage) e UX
+   * ---------------------------------------------------------------------- */
+  function updateQuickPromptsVisibility(visible, animate = false) {
+    const el = dom.quickPrompts;
+    if (!el) return;
+
+    const isAlreadyVisible = !el.hidden && el.classList.contains('quick-prompts--visible');
+
+    if (visible) {
+      el.hidden = false;
+      el.classList.add('quick-prompts--visible');
+      if (animate && !isAlreadyVisible) {
+        el.classList.remove('quick-prompts--pop');
+        // Força reflow no navegador para disparar a animação novamente
+        void el.offsetWidth;
+        el.classList.add('quick-prompts--pop');
+      }
+      dom.quickPromptButtons.forEach((btn) => {
+        btn.tabIndex = 0;
+        btn.removeAttribute('aria-hidden');
+      });
+    } else {
+      el.hidden = true;
+      el.classList.remove('quick-prompts--visible', 'quick-prompts--pop');
+      dom.quickPromptButtons.forEach((btn) => {
+        btn.tabIndex = -1;
+        btn.setAttribute('aria-hidden', 'true');
+      });
+    }
+  }
+
+  function saveChatHistory() {
+    try {
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(savedChatMessages));
+    } catch (err) {
+      console.warn('Erro ao salvar chat no localStorage:', err);
+      try {
+        // Se exceder a cota de storage devido a imagens em base64, salva o texto das mensagens
+        const stripped = savedChatMessages.map((m) => {
+          if (m.imageDataUrl) {
+            const copy = { ...m };
+            delete copy.imageDataUrl;
+            return copy;
+          }
+          return m;
+        });
+        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(stripped));
+      } catch (e2) {
+        console.warn('Falha persistente ao salvar chat:', e2);
+      }
+    }
+  }
+
+  function loadChatHistory() {
+    try {
+      const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+      if (!raw) {
+        updateQuickPromptsVisibility(false, false);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const validMessages = parsed.filter((m) => m && typeof m === 'object' && (m.role === 'user' || m.role === 'tutor'));
+        if (validMessages.length === 0) {
+          updateQuickPromptsVisibility(false, false);
+          return;
+        }
+
+        savedChatMessages = validMessages;
+        conversationHistory = [];
+
+        // Restaura a estrutura inicial antes de recriar as mensagens salvas
+        dom.chatLog.innerHTML = `
+          <div class="message message--tutor">
+            <p class="message__author">Tutor</p>
+            <div class="message__bubble">
+              <p>Oi! Sou seu tutor. Pode me perguntar o que quiser, no seu ritmo. Não tem pressa por aqui.</p>
+            </div>
+          </div>
+        `;
+
+        validMessages.forEach((msg) => {
+          if (msg.role === 'user') {
+            appendUserMessage(msg.text || '', msg.imageDataUrl, { skipPersist: true });
+            conversationHistory.push({
+              role: 'user',
+              content: msg.effectiveText || (msg.text && msg.text.trim()) || 'Transcreva o texto desta imagem.',
+            });
+          } else if (msg.role === 'tutor') {
+            appendTutorMessage(msg.text || '', { skipPersist: true });
+            conversationHistory.push({
+              role: 'assistant',
+              content: msg.text || '',
+            });
+          }
+        });
+
+        const hasTutorMessage = validMessages.some((m) => m.role === 'tutor');
+        updateQuickPromptsVisibility(hasTutorMessage, false);
+        renderMathIn(dom.chatLog);
+        scrollChatToEnd();
+      } else {
+        updateQuickPromptsVisibility(false, false);
+      }
+    } catch (err) {
+      console.warn('Não foi possível carregar histórico de conversa salvo:', err);
+      updateQuickPromptsVisibility(false, false);
+    }
+  }
+
+  function handleClearChat() {
+    if (conversationHistory.length === 0 && savedChatMessages.length === 0) {
+      announce('A conversa já está no início.');
+      return;
+    }
+
+    const confirmed = window.confirm('Deseja limpar toda a conversa e começar do zero?');
+    if (!confirmed) return;
+
+    if (currentAbortController) {
+      try {
+        currentAbortController.abort();
+      } catch (_) {}
+      currentAbortController = null;
+    }
+
+    hideLoadingIndicator();
+    setFormBusy(false);
+
+    conversationHistory = [];
+    savedChatMessages = [];
+
+    try {
+      localStorage.removeItem(CHAT_STORAGE_KEY);
+    } catch (err) {
+      console.warn('Erro ao remover histórico do chat no localStorage:', err);
+    }
+
+    // Restaura o chat apenas com a mensagem inicial amigável do tutor
+    dom.chatLog.innerHTML = `
+      <div class="message message--tutor">
+        <p class="message__author">Tutor</p>
+        <div class="message__bubble">
+          <p>Oi! Sou seu tutor. Pode me perguntar o que quiser, no seu ritmo. Não tem pressa por aqui.</p>
+        </div>
+      </div>
+    `;
+
+    updateQuickPromptsVisibility(false, false);
+    clearAttachedImage();
+    clearImageError();
+    announce('Conversa limpa com sucesso. O histórico foi reiniciado.');
+    if (dom.campoMensagem) {
+      dom.campoMensagem.focus();
+    }
+  }
+
+  function appendUserMessage(text, imageDataUrl, { effectiveText, skipPersist = false } = {}) {
+    const trimmed = (text || '').trim();
+    let messageHtml = '';
+    if (trimmed) {
+      messageHtml = formatMessageToHtml(trimmed);
+    } else if (!imageDataUrl) {
+      messageHtml = '<p class="message__note"><em>[Foto enviada]</em></p>';
+    }
+
     appendMessage({
       role: 'user',
-      html: text.trim() ? formatMessageToHtml(text) : '',
+      html: messageHtml,
       plainTextForHistory: text,
       imageDataUrl,
     });
+    if (!skipPersist) {
+      savedChatMessages.push({
+        role: 'user',
+        text,
+        effectiveText: effectiveText || text || 'Transcreva o texto desta imagem.',
+        imageDataUrl,
+      });
+      saveChatHistory();
+    }
   }
 
-  function appendTutorMessage(text) {
+  function appendTutorMessage(text, { skipPersist = false } = {}) {
     appendMessage({
       role: 'tutor',
       html: formatMessageToHtml(text),
       plainTextForHistory: text,
     });
+    if (!skipPersist) {
+      savedChatMessages.push({
+        role: 'tutor',
+        text,
+      });
+      saveChatHistory();
+      // O tutor respondeu à pergunta: exibe os atalhos rápidos com efeito de balões dando pop!
+      updateQuickPromptsVisibility(true, true);
+    }
   }
 
   function appendSystemMessage(text, { danger = false } = {}) {
@@ -617,8 +835,16 @@
     // precisa digitar nada para simplesmente "mostrar a foto" ao tutor.
     const effectiveText = trimmed || 'Transcreva o texto desta imagem.';
 
+    if (currentAbortController) {
+      try {
+        currentAbortController.abort();
+      } catch (_) {}
+    }
+    currentAbortController = new AbortController();
+    const signal = currentAbortController.signal;
+
     setFormBusy(true);
-    appendUserMessage(trimmed, imageToSend ? imageToSend.dataUrl : undefined);
+    appendUserMessage(trimmed, imageToSend ? imageToSend.dataUrl : undefined, { effectiveText, skipPersist: true });
     clearAttachedImage();
     showLoadingIndicator();
 
@@ -639,8 +865,12 @@
           'ngrok-skip-browser-warning': 'true',
         },
         body: JSON.stringify(payload),
+        signal,
       });
     } catch (networkErr) {
+      if (signal.aborted || networkErr.name === 'AbortError') {
+        return; // Operação cancelada pelo usuário (ex.: limpou o chat)
+      }
       hideLoadingIndicator();
       const msg = friendlyErrorMessage('network');
       appendSystemMessage(msg, { danger: true });
@@ -648,6 +878,8 @@
       setFormBusy(false);
       return;
     }
+
+    if (signal.aborted) return;
 
     if (!response.ok) {
       hideLoadingIndicator();
@@ -664,6 +896,7 @@
     try {
       data = await response.json();
     } catch (parseErr) {
+      if (signal.aborted) return;
       hideLoadingIndicator();
       const msg = friendlyErrorMessage('parse');
       appendSystemMessage(msg, { danger: true });
@@ -671,6 +904,8 @@
       setFormBusy(false);
       return;
     }
+
+    if (signal.aborted) return;
 
     // A API pode nomear o campo de resposta de formas diferentes;
     // tentamos as chaves mais comuns antes de desistir.
@@ -692,10 +927,25 @@
       return;
     }
 
-    appendTutorMessage(replyText);
+    // Persiste no localStorage a pergunta e a resposta juntas de forma atômica
+    savedChatMessages.push({
+      role: 'user',
+      text: trimmed,
+      effectiveText,
+      imageDataUrl: imageToSend ? imageToSend.dataUrl : undefined,
+    });
+    savedChatMessages.push({
+      role: 'tutor',
+      text: replyText,
+    });
+    saveChatHistory();
+
+    appendTutorMessage(replyText, { skipPersist: true });
+    updateQuickPromptsVisibility(true, true);
     conversationHistory.push({ role: 'user', content: effectiveText });
     conversationHistory.push({ role: 'assistant', content: replyText });
 
+    currentAbortController = null;
     setFormBusy(false);
   }
 
@@ -927,10 +1177,18 @@
 
     dom.quickPromptButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
+        // Bloqueia qualquer ativação antes da primeira resposta do tutor
+        if (dom.quickPrompts && (dom.quickPrompts.hidden || !dom.quickPrompts.classList.contains('quick-prompts--visible'))) {
+          return;
+        }
         const text = QUICK_PROMPT_TEXT[btn.dataset.prompt];
         if (text) sendMessage(text);
       });
     });
+
+    if (dom.btnLimparChat) {
+      dom.btnLimparChat.addEventListener('click', handleClearChat);
+    }
 
     initImageAttachment();
   }
@@ -944,7 +1202,13 @@
     watchSystemColorScheme();
     initPreferenceControls();
     initChatForm();
+    loadChatHistory();
     renderMathIn(dom.chatLog);
+
+    // Garante nova tentativa de renderização assim que todos os assets (incluindo KaTeX) carregarem
+    window.addEventListener('load', () => {
+      renderMathIn(dom.chatLog);
+    });
 
     // Se o KaTeX não carregou (CDN bloqueado, sem internet, cache antigo, etc.),
     // avisa em vez de deixar as fórmulas aparecerem cruas sem explicação.
