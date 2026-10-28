@@ -431,9 +431,10 @@ export async function onRequestPost(context) {
   } catch (err) {
     const statusCode = err?.statusCode || 500;
     if (statusCode === 401 || statusCode === 403) {
+      const suffix = apiKey ? apiKey.trim().slice(-4) : "vazia";
       return jsonError(
         401,
-        "A chave GEMINI_API_KEY configurada não foi aceita pelo Google (erro 401/403). Gere uma chave gratuita que comece com 'AIzaSy...' em https://aistudio.google.com/app/apikey e atualize nas variáveis da Cloudflare.",
+        `A chave GEMINI_API_KEY ativa no servidor (final '...${suffix}') foi recusada pelo Google (status ${statusCode}). Vá em Settings -> Variables and Secrets na Cloudflare e atualize a GEMINI_API_KEY.`,
         request
       );
     }

@@ -1,6 +1,7 @@
 name = "tutor-educacional-inclusivo"
 main = "worker.js"
 compatibility_date = "2025-01-01"
+keep_vars = true
 
 [build]
 command = "mkdir -p public && cp index.html style.css app.js logo.jpg public/"
