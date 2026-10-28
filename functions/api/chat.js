@@ -150,7 +150,10 @@ async function callGeminiWithRetry({ apiKey, model, fallbackModel, contents }) {
 
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey.trim(),
+      },
       body: JSON.stringify(requestBody),
     });
 
@@ -410,6 +413,13 @@ export async function onRequestPost(context) {
     );
   } catch (err) {
     const statusCode = err?.statusCode || 500;
+    if (statusCode === 401 || statusCode === 403) {
+      return jsonError(
+        401,
+        "A chave GEMINI_API_KEY configurada não foi aceita pelo Google (erro 401/403). Gere uma chave gratuita que comece com 'AIzaSy...' em https://aistudio.google.com/app/apikey e atualize nas variáveis da Cloudflare.",
+        request
+      );
+    }
     if (statusCode === 429) {
       return jsonError(
         429,
