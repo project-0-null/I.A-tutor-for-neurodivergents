@@ -27,6 +27,7 @@
         window.location.port === '8788' ||
         window.location.pathname.startsWith('/api') ||
         window.location.hostname.endsWith('.pages.dev') ||
+        window.location.hostname.endsWith('.workers.dev') ||
         window.location.hostname.endsWith('.ngrok-free.app') ||
         window.location.hostname.endsWith('.ngrok-free.dev') ||
         window.location.hostname.endsWith('.ngrok.io')

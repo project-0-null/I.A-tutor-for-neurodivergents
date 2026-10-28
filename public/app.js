@@ -1,0 +1,1233 @@
+/**
+ * Tutor Educacional Acessível — app.js
+ * JavaScript puro (sem frameworks). Responsável por:
+ *  - Preferências de acessibilidade (fonte, tamanho, espaçamento, contraste, modo simples)
+ *  - Renderização das mensagens do chat (com lista/negrito) de forma segura (sem HTML injetado)
+ *  - Integração com a API local em FastAPI (http://localhost:8000/api/chat)
+ */
+
+(() => {
+  'use strict';
+
+  /* ------------------------------------------------------------------------
+   * Configuração
+   * ---------------------------------------------------------------------- */
+  // Detecção inteligente de URL:
+  // 1. Se estiver na mesma porta (8000) ou servido diretamente via ngrok, usa '/api/chat' relativo.
+  // 2. Se aberto via Live Server (porta 5500, 3000, etc.) em localhost, conecta ao backend em http://localhost:8000/api/chat.
+  // 3. Suporta URL personalizada salva no localStorage ('tutor_custom_api_url') caso desejado.
+  const API_URL = (() => {
+    const customUrl = localStorage.getItem('tutor_custom_api_url');
+    if (customUrl && customUrl.trim()) {
+      return customUrl.trim().replace(/\/+$/, '') + '/api/chat';
+    }
+    if (window.location.protocol.startsWith('http')) {
+      if (
+        window.location.port === '8000' ||
+        window.location.port === '8788' ||
+        window.location.pathname.startsWith('/api') ||
+        window.location.hostname.endsWith('.pages.dev') ||
+        window.location.hostname.endsWith('.workers.dev') ||
+        window.location.hostname.endsWith('.ngrok-free.app') ||
+        window.location.hostname.endsWith('.ngrok-free.dev') ||
+        window.location.hostname.endsWith('.ngrok.io')
+      ) {
+        return '/api/chat';
+      }
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return 'http://localhost:8000/api/chat';
+      }
+    }
+    return '/api/chat';
+  })();
+  const STORAGE_KEY = 'tutorA11y.prefs.v1';
+  const CHAT_STORAGE_KEY = 'tutorA11y.chat.v1';
+  const MAX_HISTORY_MESSAGES = 20; // limite de mensagens enviadas no campo "history"
+  const FONT_SCALE_STEPS = [0.9, 1, 1.1, 1.2, 1.3];
+
+  // Mesmos limites validados no backend (main.py) — checar aqui só dá feedback mais rápido,
+  // a validação que realmente importa (segurança) é sempre a do servidor.
+  const ALLOWED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+  const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
+
+  const FONT_STACKS = {
+    lexend: 'var(--font-default)',
+    arial: 'var(--font-arial)',
+    dyslexic: 'var(--font-dyslexic)',
+  };
+
+  /* ------------------------------------------------------------------------
+   * Referências de DOM
+   * ---------------------------------------------------------------------- */
+  const dom = {
+    html: document.documentElement,
+    body: document.body,
+    statusAnnouncer: document.getElementById('status-announcer'),
+
+    btnModoSimples: document.getElementById('btn-modo-simples'),
+    btnLimparChat: document.getElementById('btn-limpar-chat'),
+
+    campoHiperfoco: document.getElementById('campo-hiperfoco'),
+
+    fontButtons: Array.from(document.querySelectorAll('.option-btn[data-font]')),
+    btnSizeInc: document.getElementById('btn-size-inc'),
+    btnSizeDec: document.getElementById('btn-size-dec'),
+    sizeLabel: document.getElementById('size-label'),
+
+    chkModoEscuro: document.getElementById('chk-modo-escuro'),
+    chkEspacamento: document.getElementById('chk-espacamento'),
+    chkReduzirCores: document.getElementById('chk-reduzir-cores'),
+    chkContraste: document.getElementById('chk-contraste'),
+
+    energyButtons: Array.from(document.querySelectorAll('.energy-gauge__seg')),
+    btnSimplificarAgora: document.getElementById('btn-simplificar-agora'),
+
+    chatLog: document.getElementById('chat-log'),
+    quickPrompts: document.getElementById('quick-prompts'),
+    quickPromptButtons: Array.from(document.querySelectorAll('.chip-btn[data-prompt]')),
+
+    form: document.getElementById('chat-form'),
+    campoMensagem: document.getElementById('campo-mensagem'),
+    btnEnviar: document.getElementById('btn-enviar'),
+
+    campoImagem: document.getElementById('campo-imagem'),
+    btnAnexarImagem: document.getElementById('btn-anexar-imagem'),
+    imagePreview: document.getElementById('image-preview'),
+    imagePreviewThumb: document.getElementById('image-preview-thumb'),
+    imagePreviewName: document.getElementById('image-preview-name'),
+    btnRemoverImagem: document.getElementById('btn-remover-imagem'),
+    imageError: document.getElementById('image-error'),
+  };
+
+  /* ------------------------------------------------------------------------
+   * Estado
+   * ---------------------------------------------------------------------- */
+
+  /** Histórico da conversa, mantido em memória e enviado a cada requisição. */
+  let conversationHistory = [];
+
+  /** Mensagens completas salvas localmente para persistência (Opção A). */
+  let savedChatMessages = [];
+
+  /** Imagem anexada e ainda não enviada: { base64, mimeType, name, dataUrl } | null. */
+  let attachedImage = null;
+
+  /** Controlador de requisição ativa para cancelamento seguro ao limpar o chat. */
+  let currentAbortController = null;
+
+  /** Preferências de acessibilidade, persistidas em localStorage entre sessões. */
+  let prefs = {
+    darkMode: false,
+    font: 'lexend',
+    fontScaleIndex: 1, // aponta para FONT_SCALE_STEPS -> 1.0
+    spacing: false,
+    reduceColor: false,
+    highContrast: false,
+    simpleMode: false,
+    energyLevel: null,
+    hiperfoco: '',
+  };
+
+  /** Indica se o usuário já escolheu manualmente claro/escuro alguma vez. */
+  let darkModeIsExplicit = false;
+
+  function systemPrefersDark() {
+    return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+
+  function loadPrefs() {
+    let saved = null;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) saved = JSON.parse(raw);
+    } catch (err) {
+      // localStorage indisponível (ex.: navegação privada). Segue com padrões.
+      console.warn('Não foi possível carregar preferências salvas:', err);
+    }
+
+    if (saved && typeof saved === 'object') {
+      prefs = Object.assign(prefs, saved);
+    }
+
+    // Só usamos o tema claro/escuro do sistema operacional se o usuário
+    // nunca tiver escolhido manualmente nesse navegador.
+    darkModeIsExplicit = Boolean(saved && Object.prototype.hasOwnProperty.call(saved, 'darkMode'));
+    if (!darkModeIsExplicit) {
+      prefs.darkMode = systemPrefersDark();
+    }
+  }
+
+  /** Acompanha o SO em tempo real enquanto o usuário não fizer uma escolha manual. */
+  function watchSystemColorScheme() {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (event) => {
+      if (darkModeIsExplicit) return; // usuário já decidiu; não sobrescrevemos
+      prefs.darkMode = event.matches;
+      applyPrefs();
+    };
+    // addEventListener é o padrão atual; addListener é fallback para navegadores antigos
+    if (mq.addEventListener) mq.addEventListener('change', handler);
+    else if (mq.addListener) mq.addListener(handler);
+  }
+
+  function savePrefs() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+    } catch (err) {
+      console.warn('Não foi possível salvar preferências:', err);
+    }
+  }
+
+  /* ------------------------------------------------------------------------
+   * Aplicação das preferências na interface
+   * ---------------------------------------------------------------------- */
+  function applyPrefs() {
+    // Modo escuro
+    dom.html.classList.toggle('dark-mode', prefs.darkMode);
+    dom.chkModoEscuro.checked = prefs.darkMode;
+
+    // Fonte
+    dom.html.style.setProperty('--font-active', FONT_STACKS[prefs.font] || FONT_STACKS.lexend);
+    dom.fontButtons.forEach((btn) => {
+      btn.setAttribute('aria-pressed', String(btn.dataset.font === prefs.font));
+    });
+
+    // Tamanho do texto
+    const scale = FONT_SCALE_STEPS[prefs.fontScaleIndex];
+    dom.html.style.setProperty('--font-scale', String(scale));
+    dom.sizeLabel.textContent = `${Math.round(scale * 100)}%`;
+
+    // Espaçamento ampliado
+    dom.html.classList.toggle('spacing-ampla', prefs.spacing);
+    dom.chkEspacamento.checked = prefs.spacing;
+
+    // Reduzir cores/estímulos
+    dom.html.classList.toggle('reduce-color', prefs.reduceColor);
+    dom.chkReduzirCores.checked = prefs.reduceColor;
+
+    // Alto contraste
+    dom.html.classList.toggle('high-contrast', prefs.highContrast);
+    dom.chkContraste.checked = prefs.highContrast;
+
+    // Modo simples
+    dom.body.classList.toggle('simple-mode', prefs.simpleMode);
+    dom.btnModoSimples.setAttribute('aria-pressed', String(prefs.simpleMode));
+
+    // Nível de energia (visual apenas — não é enviado à API)
+    dom.energyButtons.forEach((btn) => {
+      btn.setAttribute('aria-pressed', String(btn.dataset.level === prefs.energyLevel));
+    });
+
+    // Hiperfoco
+    if (dom.campoHiperfoco.value !== prefs.hiperfoco) {
+      dom.campoHiperfoco.value = prefs.hiperfoco;
+    }
+  }
+
+  /* ------------------------------------------------------------------------
+   * Handlers de preferências
+   * ---------------------------------------------------------------------- */
+  function initPreferenceControls() {
+    dom.fontButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        prefs.font = btn.dataset.font;
+        savePrefs();
+        applyPrefs();
+      });
+    });
+
+    dom.btnSizeInc.addEventListener('click', () => {
+      prefs.fontScaleIndex = Math.min(prefs.fontScaleIndex + 1, FONT_SCALE_STEPS.length - 1);
+      savePrefs();
+      applyPrefs();
+    });
+
+    dom.btnSizeDec.addEventListener('click', () => {
+      prefs.fontScaleIndex = Math.max(prefs.fontScaleIndex - 1, 0);
+      savePrefs();
+      applyPrefs();
+    });
+
+    dom.chkModoEscuro.addEventListener('change', () => {
+      prefs.darkMode = dom.chkModoEscuro.checked;
+      darkModeIsExplicit = true;
+      savePrefs();
+      applyPrefs();
+      announce(prefs.darkMode ? 'Modo escuro ativado.' : 'Modo escuro desativado.');
+    });
+
+    dom.chkEspacamento.addEventListener('change', () => {
+      prefs.spacing = dom.chkEspacamento.checked;
+      savePrefs();
+      applyPrefs();
+    });
+
+    dom.chkReduzirCores.addEventListener('change', () => {
+      prefs.reduceColor = dom.chkReduzirCores.checked;
+      savePrefs();
+      applyPrefs();
+    });
+
+    dom.chkContraste.addEventListener('change', () => {
+      prefs.highContrast = dom.chkContraste.checked;
+      savePrefs();
+      applyPrefs();
+    });
+
+    dom.btnModoSimples.addEventListener('click', () => {
+      prefs.simpleMode = !prefs.simpleMode;
+      // Ao ativar o modo simples, garante um tamanho de texto minimamente maior,
+      // sem sobrescrever uma escolha do usuário que já seja maior que isso.
+      if (prefs.simpleMode) {
+        prefs.fontScaleIndex = Math.max(prefs.fontScaleIndex, 2); // 1.1x
+      }
+      savePrefs();
+      applyPrefs();
+      announce(prefs.simpleMode ? 'Modo simples ativado.' : 'Modo simples desativado.');
+    });
+
+    dom.energyButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const level = btn.dataset.level;
+        prefs.energyLevel = prefs.energyLevel === level ? null : level;
+        savePrefs();
+        applyPrefs();
+      });
+    });
+
+    dom.btnSimplificarAgora.addEventListener('click', () => {
+      prefs.simpleMode = true;
+      prefs.spacing = true;
+      prefs.reduceColor = true;
+      prefs.fontScaleIndex = Math.max(prefs.fontScaleIndex, 2);
+      savePrefs();
+      applyPrefs();
+      announce('Interface simplificada.');
+    });
+
+    dom.campoHiperfoco.addEventListener('input', () => {
+      prefs.hiperfoco = dom.campoHiperfoco.value;
+      savePrefs();
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+   * Acessibilidade: anúncios para leitor de tela
+   * ---------------------------------------------------------------------- */
+  function announce(message) {
+    dom.statusAnnouncer.textContent = '';
+    // pequeno atraso garante que leitores de tela percebam a mudança de texto
+    window.setTimeout(() => {
+      dom.statusAnnouncer.textContent = message;
+    }, 50);
+  }
+
+  /* ------------------------------------------------------------------------
+   * Formatação de texto (markdown leve, código e fórmulas LaTeX)
+   * Suporta: **negrito**, `código`, blocos de código ```, listas com "- " / "* ",
+   * listas numeradas "1. " e expressões matemáticas LaTeX ($...$, $$...$$, \[...\], \begin{...}).
+   * O texto é sempre escapado primeiro para evitar HTML malicioso vindo da API.
+   * ---------------------------------------------------------------------- */
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function applyInlineFormatting(escapedLine) {
+    return escapedLine
+      // `código inline` -> <code>código inline</code>
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      // **negrito** -> <strong>negrito</strong> (já escapado, seguro para inserir)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  }
+
+  function formatMessageToHtml(rawText) {
+    // 1. Extrai blocos de código com cercas (```...```) para preservar indentação e quebras
+    const codeBlocks = [];
+    let workingText = String(rawText).replace(/```([a-zA-Z0-9_ -]*)\r?\n([\s\S]*?)```/g, (_, lang, code) => {
+      codeBlocks.push({ lang, code });
+      return `@@CODEBLOCK${codeBlocks.length - 1}@@`;
+    });
+
+    // 2. Extrai fórmulas matemáticas em bloco ($$...$$, \[...\], \begin{...}...\end{...}).
+    // Extraímos elas ANTES de dividir o texto em parágrafos por linha para que os delimitadores
+    // de abertura e fechamento não fiquem em parágrafos <p> diferentes.
+    const mathBlocks = [];
+    workingText = workingText.replace(/\$\$[\s\S]+?\$\$/g, (match) => {
+      mathBlocks.push(match);
+      return `@@MATHBLOCK${mathBlocks.length - 1}@@`;
+    });
+    workingText = workingText.replace(/\\\[[\s\S]+?\\\]/g, (match) => {
+      mathBlocks.push(match);
+      return `@@MATHBLOCK${mathBlocks.length - 1}@@`;
+    });
+    workingText = workingText.replace(/\\begin\{([a-zA-Z]+\*?)\}[\s\S]+?\\end\{\1\}/g, (match) => {
+      mathBlocks.push(match);
+      return `@@MATHBLOCK${mathBlocks.length - 1}@@`;
+    });
+
+    const lines = workingText.replace(/\r\n/g, '\n').split('\n');
+    const htmlParts = [];
+
+    let listBuffer = [];
+    let listType = null; // 'ul' | 'ol'
+
+    const flushList = () => {
+      if (listBuffer.length === 0) return;
+      const tag = listType === 'ol' ? 'ol' : 'ul';
+      htmlParts.push(`<${tag}>${listBuffer.join('')}</${tag}>`);
+      listBuffer = [];
+      listType = null;
+    };
+
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+
+      if (trimmed === '') {
+        flushList();
+        return;
+      }
+
+      // Bloco de código isolado
+      const codeMatch = /^@@CODEBLOCK(\d+)@@$/.exec(trimmed);
+      if (codeMatch) {
+        flushList();
+        htmlParts.push(trimmed);
+        return;
+      }
+
+      // Bloco de fórmula LaTeX isolado
+      const mathMatch = /^@@MATHBLOCK(\d+)@@$/.exec(trimmed);
+      if (mathMatch) {
+        flushList();
+        htmlParts.push(trimmed);
+        return;
+      }
+
+      // Linha divisória em markdown: --- ou *** ou ___ (3 ou mais caracteres, suportando espaços como '- - -')
+      if (/^(?:-{3,}|\*{3,}|_{3,}|(?:-\s*){3,}|(?:\*\s*){3,})$/.test(trimmed)) {
+        flushList();
+        htmlParts.push('<hr class="message__divider">');
+        return;
+      }
+
+      // Cabeçalhos / Títulos em markdown (##, ### etc.) -> tags <h3> limpas
+      const headingMatch = /^#{1,4}\s+(.*)$/.exec(trimmed);
+      if (headingMatch) {
+        flushList();
+        const cleanHeading = headingMatch[1].replace(/\s+#+\s*$/, '').trim();
+        const headingContent = applyInlineFormatting(escapeHtml(cleanHeading));
+        htmlParts.push(`<h3>${headingContent}</h3>`);
+        return;
+      }
+
+      const bulletMatch = /^[-*]\s+(.*)$/.exec(trimmed);
+      const numberedMatch = /^\d+[.)]\s+(.*)$/.exec(trimmed);
+
+      if (bulletMatch) {
+        if (listType !== 'ul') flushList();
+        listType = 'ul';
+        listBuffer.push(`<li>${applyInlineFormatting(escapeHtml(bulletMatch[1]))}</li>`);
+        return;
+      }
+
+      if (numberedMatch) {
+        if (listType !== 'ol') flushList();
+        listType = 'ol';
+        listBuffer.push(`<li>${applyInlineFormatting(escapeHtml(numberedMatch[1]))}</li>`);
+        return;
+      }
+
+      flushList();
+      htmlParts.push(`<p>${applyInlineFormatting(escapeHtml(trimmed))}</p>`);
+    });
+
+    flushList();
+    let resultHtml = htmlParts.join('') || `<p>${escapeHtml(String(rawText))}</p>`;
+
+    // Restaura blocos de código
+    resultHtml = resultHtml.replace(/@@CODEBLOCK(\d+)@@/g, (_, idx) => {
+      const block = codeBlocks[Number(idx)];
+      return `<pre><code>${escapeHtml(block.code.trim())}</code></pre>`;
+    });
+
+    // Restaura os blocos de fórmula como texto puro e seguro (já escapado);
+    // quem interpreta a sintaxe LaTeX é o KaTeX, chamado depois de inserir o HTML no DOM.
+    resultHtml = resultHtml.replace(/@@MATHBLOCK(\d+)@@/g, (_, idx) => escapeHtml(mathBlocks[Number(idx)]));
+
+    return resultHtml;
+  }
+
+  /* ------------------------------------------------------------------------
+   * Renderização de fórmulas LaTeX (KaTeX)
+   * Roda depois que o HTML já está inserido no DOM: o KaTeX varre os nós de
+   * texto da bolha procurando pelos delimitadores abaixo e substitui cada
+   * trecho encontrado pela fórmula tipografada, sem alterar o resto do texto.
+   * ---------------------------------------------------------------------- */
+  const MATH_DELIMITERS = [
+    { left: '$$', right: '$$', display: true },
+    { left: '\\[', right: '\\]', display: true },
+    { left: '\\(', right: '\\)', display: false },
+    { left: '$', right: '$', display: false },
+    { left: '\\begin{equation}', right: '\\end{equation}', display: true },
+    { left: '\\begin{align}', right: '\\end{align}', display: true },
+    { left: '\\begin{align*}', right: '\\end{align*}', display: true },
+    { left: '\\begin{alignat}', right: '\\end{alignat}', display: true },
+    { left: '\\begin{gather}', right: '\\end{gather}', display: true },
+    { left: '\\begin{matrix}', right: '\\end{matrix}', display: true },
+    { left: '\\begin{pmatrix}', right: '\\end{pmatrix}', display: true },
+    { left: '\\begin{bmatrix}', right: '\\end{bmatrix}', display: true },
+    { left: '\\begin{cases}', right: '\\end{cases}', display: true },
+  ];
+
+  function renderMathIn(element) {
+    if (!element || typeof window.renderMathInElement !== 'function') return; // KaTeX ainda não carregou (ex.: sem internet)
+    try {
+      window.renderMathInElement(element, {
+        delimiters: MATH_DELIMITERS,
+        throwOnError: false, // fórmula malformada vira um aviso discreto, não quebra a página
+        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'annotation'],
+      });
+    } catch (err) {
+      console.warn('Não foi possível renderizar uma fórmula LaTeX:', err);
+    }
+  }
+
+  /* ------------------------------------------------------------------------
+   * Renderização do chat
+   * ---------------------------------------------------------------------- */
+  function scrollChatToEnd() {
+    dom.chatLog.scrollTop = dom.chatLog.scrollHeight;
+  }
+
+  function appendMessage({ role, html, plainTextForHistory, imageDataUrl }) {
+    const wrapper = document.createElement('div');
+    wrapper.className = `message message--${role}`;
+
+    const author = document.createElement('p');
+    author.className = 'message__author';
+    author.textContent = role === 'user' ? 'Você' : role === 'tutor' ? 'Tutor' : 'Aviso';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message__bubble';
+
+    if (imageDataUrl) {
+      const img = document.createElement('img');
+      img.className = 'message__image';
+      img.src = imageDataUrl;
+      img.alt = 'Foto enviada por você';
+      bubble.appendChild(img);
+    }
+
+    const contentWrapper = document.createElement('div');
+    contentWrapper.innerHTML = html;
+    while (contentWrapper.firstChild) {
+      bubble.appendChild(contentWrapper.firstChild);
+    }
+    renderMathIn(bubble);
+
+    wrapper.appendChild(author);
+    wrapper.appendChild(bubble);
+    dom.chatLog.appendChild(wrapper);
+    scrollChatToEnd();
+
+    return { wrapper, plainTextForHistory };
+  }
+
+  /* ------------------------------------------------------------------------
+   * Persistência de Conversa (Opção A - localStorage) e UX
+   * ---------------------------------------------------------------------- */
+  function updateQuickPromptsVisibility(visible, animate = false) {
+    const el = dom.quickPrompts;
+    if (!el) return;
+
+    const isAlreadyVisible = !el.hidden && el.classList.contains('quick-prompts--visible');
+
+    if (visible) {
+      el.hidden = false;
+      el.classList.add('quick-prompts--visible');
+      if (animate && !isAlreadyVisible) {
+        el.classList.remove('quick-prompts--pop');
+        // Força reflow no navegador para disparar a animação novamente
+        void el.offsetWidth;
+        el.classList.add('quick-prompts--pop');
+      }
+      dom.quickPromptButtons.forEach((btn) => {
+        btn.tabIndex = 0;
+        btn.removeAttribute('aria-hidden');
+      });
+    } else {
+      el.hidden = true;
+      el.classList.remove('quick-prompts--visible', 'quick-prompts--pop');
+      dom.quickPromptButtons.forEach((btn) => {
+        btn.tabIndex = -1;
+        btn.setAttribute('aria-hidden', 'true');
+      });
+    }
+  }
+
+  function saveChatHistory() {
+    try {
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(savedChatMessages));
+    } catch (err) {
+      console.warn('Erro ao salvar chat no localStorage:', err);
+      try {
+        // Se exceder a cota de storage devido a imagens em base64, salva o texto das mensagens
+        const stripped = savedChatMessages.map((m) => {
+          if (m.imageDataUrl) {
+            const copy = { ...m };
+            delete copy.imageDataUrl;
+            return copy;
+          }
+          return m;
+        });
+        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(stripped));
+      } catch (e2) {
+        console.warn('Falha persistente ao salvar chat:', e2);
+      }
+    }
+  }
+
+  function loadChatHistory() {
+    try {
+      const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+      if (!raw) {
+        updateQuickPromptsVisibility(false, false);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const validMessages = parsed.filter((m) => m && typeof m === 'object' && (m.role === 'user' || m.role === 'tutor'));
+        if (validMessages.length === 0) {
+          updateQuickPromptsVisibility(false, false);
+          return;
+        }
+
+        savedChatMessages = validMessages;
+        conversationHistory = [];
+
+        // Restaura a estrutura inicial antes de recriar as mensagens salvas
+        dom.chatLog.innerHTML = `
+          <div class="message message--tutor">
+            <p class="message__author">Tutor</p>
+            <div class="message__bubble">
+              <p>Oi! Sou seu tutor. Pode me perguntar o que quiser, no seu ritmo. Não tem pressa por aqui.</p>
+            </div>
+          </div>
+        `;
+
+        validMessages.forEach((msg) => {
+          if (msg.role === 'user') {
+            appendUserMessage(msg.text || '', msg.imageDataUrl, { skipPersist: true });
+            conversationHistory.push({
+              role: 'user',
+              content: msg.effectiveText || (msg.text && msg.text.trim()) || 'Transcreva o texto desta imagem.',
+            });
+          } else if (msg.role === 'tutor') {
+            appendTutorMessage(msg.text || '', { skipPersist: true });
+            conversationHistory.push({
+              role: 'assistant',
+              content: msg.text || '',
+            });
+          }
+        });
+
+        const hasTutorMessage = validMessages.some((m) => m.role === 'tutor');
+        updateQuickPromptsVisibility(hasTutorMessage, false);
+        renderMathIn(dom.chatLog);
+        scrollChatToEnd();
+      } else {
+        updateQuickPromptsVisibility(false, false);
+      }
+    } catch (err) {
+      console.warn('Não foi possível carregar histórico de conversa salvo:', err);
+      updateQuickPromptsVisibility(false, false);
+    }
+  }
+
+  function handleClearChat() {
+    if (conversationHistory.length === 0 && savedChatMessages.length === 0) {
+      announce('A conversa já está no início.');
+      return;
+    }
+
+    const confirmed = window.confirm('Deseja limpar toda a conversa e começar do zero?');
+    if (!confirmed) return;
+
+    if (currentAbortController) {
+      try {
+        currentAbortController.abort();
+      } catch (_) {}
+      currentAbortController = null;
+    }
+
+    hideLoadingIndicator();
+    setFormBusy(false);
+
+    conversationHistory = [];
+    savedChatMessages = [];
+
+    try {
+      localStorage.removeItem(CHAT_STORAGE_KEY);
+    } catch (err) {
+      console.warn('Erro ao remover histórico do chat no localStorage:', err);
+    }
+
+    // Restaura o chat apenas com a mensagem inicial amigável do tutor
+    dom.chatLog.innerHTML = `
+      <div class="message message--tutor">
+        <p class="message__author">Tutor</p>
+        <div class="message__bubble">
+          <p>Oi! Sou seu tutor. Pode me perguntar o que quiser, no seu ritmo. Não tem pressa por aqui.</p>
+        </div>
+      </div>
+    `;
+
+    updateQuickPromptsVisibility(false, false);
+    clearAttachedImage();
+    clearImageError();
+    announce('Conversa limpa com sucesso. O histórico foi reiniciado.');
+    if (dom.campoMensagem) {
+      dom.campoMensagem.focus();
+    }
+  }
+
+  function appendUserMessage(text, imageDataUrl, { effectiveText, skipPersist = false } = {}) {
+    const trimmed = (text || '').trim();
+    let messageHtml = '';
+    if (trimmed) {
+      messageHtml = formatMessageToHtml(trimmed);
+    } else if (!imageDataUrl) {
+      messageHtml = '<p class="message__note"><em>[Foto enviada]</em></p>';
+    }
+
+    appendMessage({
+      role: 'user',
+      html: messageHtml,
+      plainTextForHistory: text,
+      imageDataUrl,
+    });
+    if (!skipPersist) {
+      savedChatMessages.push({
+        role: 'user',
+        text,
+        effectiveText: effectiveText || text || 'Transcreva o texto desta imagem.',
+        imageDataUrl,
+      });
+      saveChatHistory();
+    }
+  }
+
+  function appendTutorMessage(text, { skipPersist = false } = {}) {
+    appendMessage({
+      role: 'tutor',
+      html: formatMessageToHtml(text),
+      plainTextForHistory: text,
+    });
+    if (!skipPersist) {
+      savedChatMessages.push({
+        role: 'tutor',
+        text,
+      });
+      saveChatHistory();
+      // O tutor respondeu à pergunta: exibe os atalhos rápidos com efeito de balões dando pop!
+      updateQuickPromptsVisibility(true, true);
+    }
+  }
+
+  function appendSystemMessage(text, { danger = false } = {}) {
+    const wrapper = document.createElement('div');
+    wrapper.className = `message message--system${danger ? ' message--danger' : ''}`;
+
+    const author = document.createElement('p');
+    author.className = 'message__author';
+    author.textContent = 'Aviso';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message__bubble';
+    bubble.setAttribute('role', 'status');
+    bubble.innerHTML = `<p>${escapeHtml(text)}</p>`;
+
+    wrapper.appendChild(author);
+    wrapper.appendChild(bubble);
+    dom.chatLog.appendChild(wrapper);
+    scrollChatToEnd();
+  }
+
+  function showLoadingIndicator() {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message message--tutor';
+    wrapper.id = 'loading-indicator';
+
+    const author = document.createElement('p');
+    author.className = 'message__author';
+    author.textContent = 'Tutor';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message__bubble';
+    bubble.setAttribute('role', 'status');
+    bubble.setAttribute('aria-label', 'Tutor está preparando uma resposta');
+    bubble.innerHTML = '<span class="loading-dots"><span></span><span></span><span></span></span>';
+
+    wrapper.appendChild(author);
+    wrapper.appendChild(bubble);
+    dom.chatLog.appendChild(wrapper);
+    scrollChatToEnd();
+  }
+
+  function hideLoadingIndicator() {
+    const el = document.getElementById('loading-indicator');
+    if (el) el.remove();
+  }
+
+  /* ------------------------------------------------------------------------
+   * Integração com a API
+   * ---------------------------------------------------------------------- */
+  function buildHistoryPayload() {
+    // Envia só as últimas N mensagens para manter o payload enxuto.
+    return conversationHistory.slice(-MAX_HISTORY_MESSAGES);
+  }
+
+  async function parseErrorDetail(response) {
+    try {
+      const data = await response.clone().json();
+      return data.detail || data.message || data.error || '';
+    } catch (_err) {
+      try {
+        const text = await response.clone().text();
+        return text.slice(0, 200);
+      } catch (_err2) {
+        return '';
+      }
+    }
+  }
+
+  function friendlyErrorMessage(kind, detail, status) {
+    switch (kind) {
+      case 'network':
+        return 'Não consegui me conectar ao tutor. Verifique se o servidor está rodando em http://localhost:8000 e tente novamente.';
+      case 'rate-limit':
+        return detail
+          ? `Muitas perguntas em pouco tempo: ${detail}`
+          : 'Você fez perguntas rápido demais. Sem problema — espere um instante e tente de novo.';
+      case 'server':
+        return detail
+          ? `Algo não saiu como esperado: ${detail}`
+          : `Algo não saiu como esperado (erro ${status}). Tente novamente em instantes.`;
+      case 'parse':
+      default:
+        return 'A resposta do servidor veio em um formato inesperado. Tente novamente.';
+    }
+  }
+
+  /**
+   * Envia a mensagem do aluno para a API e trata a resposta (ou erro).
+   * Também funciona só com uma imagem anexada, sem nenhum texto digitado.
+   * @param {string} messageText
+   */
+  async function sendMessage(messageText) {
+    const trimmed = messageText.trim();
+    const imageToSend = attachedImage;
+
+    if (!trimmed && !imageToSend) return;
+
+    // Se só a imagem foi anexada, sem pergunta escrita, usamos um pedido padrão de
+    // transcrição — o campo "message" é obrigatório na API, e assim o aluno não
+    // precisa digitar nada para simplesmente "mostrar a foto" ao tutor.
+    const effectiveText = trimmed || 'Transcreva o texto desta imagem.';
+
+    if (currentAbortController) {
+      try {
+        currentAbortController.abort();
+      } catch (_) {}
+    }
+    currentAbortController = new AbortController();
+    const signal = currentAbortController.signal;
+
+    setFormBusy(true);
+    appendUserMessage(trimmed, imageToSend ? imageToSend.dataUrl : undefined, { effectiveText, skipPersist: true });
+    clearAttachedImage();
+    showLoadingIndicator();
+
+    const payload = {
+      message: effectiveText,
+      hiperfoco: prefs.hiperfoco.trim() ? prefs.hiperfoco.trim() : null,
+      history: buildHistoryPayload(),
+      image_base64: imageToSend ? imageToSend.base64 : null,
+      image_mime_type: imageToSend ? imageToSend.mimeType : null,
+    };
+
+    let response;
+    try {
+      response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify(payload),
+        signal,
+      });
+    } catch (networkErr) {
+      if (signal.aborted || networkErr.name === 'AbortError') {
+        return; // Operação cancelada pelo usuário (ex.: limpou o chat)
+      }
+      hideLoadingIndicator();
+      const msg = friendlyErrorMessage('network');
+      appendSystemMessage(msg, { danger: true });
+      announce(msg);
+      setFormBusy(false);
+      return;
+    }
+
+    if (signal.aborted) return;
+
+    if (!response.ok) {
+      hideLoadingIndicator();
+      const detail = await parseErrorDetail(response);
+      const kind = response.status === 429 ? 'rate-limit' : 'server';
+      const msg = friendlyErrorMessage(kind, detail, response.status);
+      appendSystemMessage(msg, { danger: response.status >= 500 });
+      announce(msg);
+      setFormBusy(false);
+      return;
+    }
+
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseErr) {
+      if (signal.aborted) return;
+      hideLoadingIndicator();
+      const msg = friendlyErrorMessage('parse');
+      appendSystemMessage(msg, { danger: true });
+      announce(msg);
+      setFormBusy(false);
+      return;
+    }
+
+    if (signal.aborted) return;
+
+    // A API pode nomear o campo de resposta de formas diferentes;
+    // tentamos as chaves mais comuns antes de desistir.
+    const replyText =
+      (typeof data === 'string' && data) ||
+      data.reply ||
+      data.response ||
+      data.message ||
+      data.content ||
+      null;
+
+    hideLoadingIndicator();
+
+    if (replyText == null) {
+      const msg = friendlyErrorMessage('parse');
+      appendSystemMessage(msg, { danger: true });
+      announce(msg);
+      setFormBusy(false);
+      return;
+    }
+
+    // Persiste no localStorage a pergunta e a resposta juntas de forma atômica
+    savedChatMessages.push({
+      role: 'user',
+      text: trimmed,
+      effectiveText,
+      imageDataUrl: imageToSend ? imageToSend.dataUrl : undefined,
+    });
+    savedChatMessages.push({
+      role: 'tutor',
+      text: replyText,
+    });
+    saveChatHistory();
+
+    appendTutorMessage(replyText, { skipPersist: true });
+    updateQuickPromptsVisibility(true, true);
+    conversationHistory.push({ role: 'user', content: effectiveText });
+    conversationHistory.push({ role: 'assistant', content: replyText });
+
+    currentAbortController = null;
+    setFormBusy(false);
+  }
+
+  function setFormBusy(isBusy) {
+    dom.btnEnviar.disabled = isBusy;
+    dom.campoMensagem.disabled = isBusy;
+    dom.btnAnexarImagem.disabled = isBusy;
+    dom.quickPromptButtons.forEach((btn) => {
+      btn.disabled = isBusy;
+    });
+    if (!isBusy) {
+      dom.campoMensagem.focus();
+    }
+  }
+
+  /* ------------------------------------------------------------------------
+   * Anexo de imagem (foto para o tutor transcrever)
+   * ---------------------------------------------------------------------- */
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error('Falha ao ler o arquivo.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /**
+   * Otimiza fotos de câmeras de celular (geralmente de 10 MB a 25 MB) usando a API nativa
+   * Canvas do navegador. Redimensiona para no máximo 1920px mantendo nitidez para OCR e
+   * gerando um arquivo de ~500 KB a 1.2 MB.
+   */
+  async function compressImageIfNeeded(file, maxDimension = 1920, quality = 0.88) {
+    // Se o arquivo for pequeno (< 2.5 MB), envia direto sem recompressão
+    if (file.size <= 2.5 * 1024 * 1024) {
+      return file;
+    }
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        let { width, height } = img;
+
+        if (!width || !height) {
+          resolve(file);
+          return;
+        }
+
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(file);
+          return;
+        }
+
+        // Fundo branco limpo para fórmulas e enunciados
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob && blob.size < file.size) {
+              const newFileName = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+              const optimized = new File([blob], newFileName, {
+                type: 'image/jpeg',
+                lastModified: Date.now(),
+              });
+              resolve(optimized);
+            } else {
+              resolve(file);
+            }
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(file);
+      };
+
+      img.src = objectUrl;
+    });
+  }
+
+  function showImageError(message) {
+    dom.imageError.textContent = message;
+    dom.imageError.hidden = false;
+  }
+
+  function clearImageError() {
+    dom.imageError.textContent = '';
+    dom.imageError.hidden = true;
+  }
+
+  function showImagePreview() {
+    if (!attachedImage) return;
+    dom.imagePreviewThumb.src = attachedImage.dataUrl;
+    dom.imagePreviewName.textContent = attachedImage.name;
+    dom.imagePreview.hidden = false;
+  }
+
+  function clearAttachedImage() {
+    attachedImage = null;
+    dom.imagePreview.hidden = true;
+    dom.imagePreviewThumb.src = '';
+    dom.imagePreviewName.textContent = '';
+    dom.campoImagem.value = ''; // permite selecionar o mesmo arquivo de novo depois
+  }
+
+  async function handleImageFileSelected(file) {
+    clearImageError();
+
+    if (!file) return;
+
+    if (!ALLOWED_IMAGE_MIME_TYPES.includes(file.type)) {
+      showImageError('Formato não suportado. Envie uma foto em JPEG, PNG, WEBP ou HEIC.');
+      dom.campoImagem.value = '';
+      return;
+    }
+
+    // Auto-compressão preventiva para fotos pesadas de celulares
+    let processedFile = file;
+    try {
+      processedFile = await compressImageIfNeeded(file);
+    } catch (compressErr) {
+      console.warn('Otimização de imagem não concluída, prosseguindo com original:', compressErr);
+    }
+
+    if (processedFile.size > MAX_IMAGE_BYTES) {
+      showImageError(`Imagem muito grande (${Math.round(processedFile.size / (1024 * 1024))} MB). O limite é ${Math.round(MAX_IMAGE_BYTES / (1024 * 1024))} MB.`);
+      dom.campoImagem.value = '';
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(processedFile);
+      const base64 = String(dataUrl).split(',', 2)[1] || '';
+      if (!base64) throw new Error('Não foi possível ler os dados da imagem.');
+
+      attachedImage = {
+        base64,
+        mimeType: processedFile.type,
+        name: processedFile.name || 'imagem',
+        dataUrl,
+      };
+      showImagePreview();
+      announce(`Imagem "${attachedImage.name}" anexada.`);
+    } catch (err) {
+      console.warn('Falha ao processar a imagem selecionada:', err);
+      showImageError('Não foi possível carregar essa imagem. Tente outro arquivo.');
+      clearAttachedImage();
+    }
+  }
+
+  function initImageAttachment() {
+    dom.btnAnexarImagem.addEventListener('click', () => {
+      dom.campoImagem.click();
+    });
+
+    dom.campoImagem.addEventListener('change', () => {
+      const file = dom.campoImagem.files && dom.campoImagem.files[0];
+      handleImageFileSelected(file);
+    });
+
+    dom.btnRemoverImagem.addEventListener('click', () => {
+      clearAttachedImage();
+      clearImageError();
+      announce('Imagem removida.');
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+   * Formulário e ações rápidas
+   * ---------------------------------------------------------------------- */
+  const QUICK_PROMPT_TEXT = {
+    simplificar: 'Pode simplificar a última explicação, com palavras mais simples?',
+    exemplo: 'Pode me dar um exemplo prático sobre isso?',
+    resumo: 'Pode resumir isso em tópicos curtos?',
+    'passo-a-passo': 'Pode explicar isso passo a passo?',
+  };
+
+  const TEXTAREA_MAX_HEIGHT_PX = 160; // deve bater com max-height: 10rem em .text-input--area no CSS
+
+  function autoResizeTextarea() {
+    const el = dom.campoMensagem;
+    el.style.height = 'auto'; // encolhe primeiro, senão scrollHeight nunca diminui ao apagar texto
+    const contentHeight = el.scrollHeight;
+    el.style.height = `${Math.min(contentHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+    // só mostra a barra/scroll interno quando o texto realmente ultrapassa a altura máxima
+    el.style.overflowY = contentHeight > TEXTAREA_MAX_HEIGHT_PX ? 'auto' : 'hidden';
+  }
+
+  function initChatForm() {
+    dom.form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const text = dom.campoMensagem.value;
+      if (!text.trim() && !attachedImage) return; // permite enviar só a imagem, sem texto
+      dom.campoMensagem.value = '';
+      autoResizeTextarea();
+      sendMessage(text);
+    });
+
+    dom.campoMensagem.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        dom.form.requestSubmit();
+      }
+    });
+
+    dom.campoMensagem.addEventListener('input', autoResizeTextarea);
+
+    dom.quickPromptButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        // Bloqueia qualquer ativação antes da primeira resposta do tutor
+        if (dom.quickPrompts && (dom.quickPrompts.hidden || !dom.quickPrompts.classList.contains('quick-prompts--visible'))) {
+          return;
+        }
+        const text = QUICK_PROMPT_TEXT[btn.dataset.prompt];
+        if (text) sendMessage(text);
+      });
+    });
+
+    if (dom.btnLimparChat) {
+      dom.btnLimparChat.addEventListener('click', handleClearChat);
+    }
+
+    initImageAttachment();
+  }
+
+  /* ------------------------------------------------------------------------
+   * Inicialização
+   * ---------------------------------------------------------------------- */
+  function init() {
+    loadPrefs();
+    applyPrefs();
+    watchSystemColorScheme();
+    initPreferenceControls();
+    initChatForm();
+    loadChatHistory();
+    renderMathIn(dom.chatLog);
+
+    // Garante nova tentativa de renderização assim que todos os assets (incluindo KaTeX) carregarem
+    window.addEventListener('load', () => {
+      renderMathIn(dom.chatLog);
+    });
+
+    // Se o KaTeX não carregou (CDN bloqueado, sem internet, cache antigo, etc.),
+    // avisa em vez de deixar as fórmulas aparecerem cruas sem explicação.
+    if (typeof window.renderMathInElement !== 'function') {
+      console.error(
+        'KaTeX não carregou: window.renderMathInElement está indefinido. ' +
+        'Verifique na aba Network do DevTools se katex.min.js e auto-render.min.js ' +
+        'retornaram status 200, e se não há erro de integridade (SRI) no Console.'
+      );
+      appendSystemMessage(
+        'As fórmulas matemáticas podem aparecer como texto simples agora: não consegui carregar o ' +
+        'renderizador de LaTeX (isso normalmente acontece por falta de internet ou bloqueio do CDN). ' +
+        'Verifique sua conexão e recarregue a página.'
+      );
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+})();

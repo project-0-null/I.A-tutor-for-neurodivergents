@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tutor Educacional Acessível</title>
+  <meta name="description" content="Assistente educacional com foco em acessibilidade e conforto cognitivo.">
+
+  <!-- Fontes: Lexend (padrão, alta legibilidade) e Arial (fallback do sistema) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- KaTeX: renderização de fórmulas em LaTeX escritas pelo tutor -->
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/katex@0.18.4/dist/katex.min.css"
+    integrity="sha384-u1zONI5gPXUx0UKI62c75/zww972y0v2rSK5ZYlVdS6xEuWDeZWUI66v6t1gvlXJ"
+    crossorigin="anonymous"
+  >
+  <script
+    defer
+    src="https://cdn.jsdelivr.net/npm/katex@0.18.4/dist/katex.min.js"
+    integrity="sha384-ykMNcWQhhTUb0YV9SPpPUFURHZ+tWmubkakGBP+OgNK/UXdO2gtzglWx0Rj9hnO3"
+    crossorigin="anonymous"
+  ></script>
+  <script
+    defer
+    src="https://cdn.jsdelivr.net/npm/katex@0.18.4/dist/contrib/auto-render.min.js"
+    integrity="sha384-bjyGPfbij8/NDKJhSGZNP/khQVgtHUE5exjm4Ydllo42FwIgYsdLO2lXGmRBf5Mz"
+    crossorigin="anonymous"
+  ></script>
+
+  <link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+
+  <!-- Link de pular navegação: primeiro elemento focável da página -->
+  <a class="skip-link" href="#campo-mensagem">Pular direto para o campo de pergunta</a>
+
+  <!-- Região usada só para avisos importantes ao leitor de tela (erros, status) -->
+  <div id="status-announcer" class="visually-hidden" role="status" aria-live="assertive" aria-atomic="true"></div>
+
+  <div class="app-shell">
+
+    <header class="app-header">
+      <div class="app-header__brand">
+        <img src="logo.jpg" alt="" class="app-header__mark">
+        <div>
+          <p class="app-header__title">Tutor Educacional</p>
+          <p class="app-header__subtitle">Um espaço calmo para aprender no seu ritmo</p>
+        </div>
+      </div>
+
+      <div class="app-header__actions">
+        <button
+          type="button"
+          id="btn-limpar-chat"
+          class="header-btn"
+          aria-label="Limpar conversa e começar do zero"
+          title="Limpar conversa"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12z"/>
+          </svg>
+          <span>Limpar conversa</span>
+        </button>
+
+        <button
+          type="button"
+          id="btn-modo-simples"
+          class="switch-btn"
+          aria-pressed="false"
+        >
+          <span class="switch-btn__track" aria-hidden="true"><span class="switch-btn__thumb"></span></span>
+          <span class="switch-btn__label">Modo simples</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-body">
+
+      <!-- Painel de Conforto: preferências visuais e cognitivas -->
+      <!-- <details> nativo garante colapso/expansão acessível sem JS extra -->
+      <details class="comfort-panel" id="painel-conforto" open>
+        <summary class="comfort-panel__summary">
+          Painel de conforto
+          <span class="comfort-panel__summary-hint">Ajuste a tela do seu jeito</span>
+        </summary>
+
+        <div class="comfort-panel__body">
+
+          <!-- Campo de Hiperfoco -->
+          <section class="comfort-block" aria-labelledby="titulo-hiperfoco">
+            <h2 id="titulo-hiperfoco" class="comfort-block__title">Seu interesse especial</h2>
+            <p class="comfort-block__help">
+              Opcional. Contamos exemplos usando esse tema sempre que possível.
+            </p>
+            <label for="campo-hiperfoco" class="field-label">Tema de interesse</label>
+            <input
+              type="text"
+              id="campo-hiperfoco"
+              name="hiperfoco"
+              class="text-input"
+              placeholder="ex.: dinossauros, trens, astronomia..."
+              autocomplete="off"
+            >
+          </section>
+
+          <!-- Fontes inclusivas -->
+          <section class="comfort-block" aria-labelledby="titulo-fonte">
+            <h2 id="titulo-fonte" class="comfort-block__title">Fonte de leitura</h2>
+            <div class="option-group" role="group" aria-label="Escolher fonte do texto">
+              <button type="button" class="option-btn" data-font="lexend" aria-pressed="true">Lexend</button>
+              <button type="button" class="option-btn" data-font="arial" aria-pressed="false">Arial</button>
+              <button type="button" class="option-btn" data-font="dyslexic" aria-pressed="false">OpenDyslexic</button>
+            </div>
+          </section>
+
+          <!-- Tamanho do texto -->
+          <section class="comfort-block" aria-labelledby="titulo-tamanho">
+            <h2 id="titulo-tamanho" class="comfort-block__title">Tamanho do texto</h2>
+            <div class="size-control" role="group" aria-label="Ajustar tamanho do texto">
+              <button type="button" id="btn-size-dec" class="icon-btn" aria-label="Diminuir tamanho do texto">A−</button>
+              <span id="size-label" class="size-control__value" aria-live="polite">100%</span>
+              <button type="button" id="btn-size-inc" class="icon-btn" aria-label="Aumentar tamanho do texto">A+</button>
+            </div>
+          </section>
+
+          <!-- Toggles de conforto visual -->
+          <section class="comfort-block" aria-labelledby="titulo-visual">
+            <h2 id="titulo-visual" class="comfort-block__title">Conforto visual</h2>
+
+            <label class="toggle-row">
+              <input type="checkbox" id="chk-modo-escuro">
+              <span>Modo escuro</span>
+            </label>
+
+            <label class="toggle-row">
+              <input type="checkbox" id="chk-espacamento">
+              <span>Espaçamento ampliado entre letras e linhas</span>
+            </label>
+
+            <label class="toggle-row">
+              <input type="checkbox" id="chk-reduzir-cores">
+              <span>Reduzir cores e estímulos visuais</span>
+            </label>
+
+            <label class="toggle-row">
+              <input type="checkbox" id="chk-contraste">
+              <span>Alto contraste (preto e branco)</span>
+            </label>
+          </section>
+
+          <!-- Nível de energia / cansaço cognitivo -->
+          <section class="comfort-block" aria-labelledby="titulo-energia">
+            <h2 id="titulo-energia" class="comfort-block__title">Como está sua energia agora?</h2>
+            <div class="energy-gauge" role="group" aria-label="Selecionar nível de energia atual">
+              <button type="button" class="energy-gauge__seg" data-level="alta" data-step="1" aria-pressed="false">
+                Alta
+              </button>
+              <button type="button" class="energy-gauge__seg" data-level="media" data-step="2" aria-pressed="false">
+                Média
+              </button>
+              <button type="button" class="energy-gauge__seg" data-level="baixa" data-step="3" aria-pressed="false">
+                Baixa
+              </button>
+              <button type="button" class="energy-gauge__seg" data-level="sobrecarregada" data-step="4" aria-pressed="false">
+                Sobrecarregado(a)
+              </button>
+            </div>
+
+            <button type="button" id="btn-simplificar-agora" class="action-btn">
+              Simplificar agora
+            </button>
+            <p class="comfort-block__help">
+              Deixa tudo maior, mais espaçado e com menos cor em um clique.
+            </p>
+          </section>
+
+        </div>
+      </details>
+
+      <!-- Área principal: conversa com o tutor -->
+      <main class="chat-panel">
+
+        <section class="chat-log-wrapper" aria-label="Conversa com o tutor">
+          <div id="chat-log" class="chat-log" role="log" aria-live="polite" aria-atomic="false">
+            <div class="message message--tutor">
+              <p class="message__author">Tutor</p>
+              <div class="message__bubble">
+                <p>Oi! Sou seu tutor. Pode me perguntar o que quiser, no seu ritmo. Não tem pressa por aqui.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Ações rápidas de pergunta (começam ocultas até o tutor responder à primeira mensagem) -->
+        <div id="quick-prompts" class="quick-prompts" role="group" aria-label="Perguntas rápidas" hidden>
+          <button type="button" class="chip-btn" data-prompt="simplificar" tabindex="-1" aria-hidden="true">Simplifique a explicação</button>
+          <button type="button" class="chip-btn" data-prompt="exemplo" tabindex="-1" aria-hidden="true">Dê um exemplo prático</button>
+          <button type="button" class="chip-btn" data-prompt="resumo" tabindex="-1" aria-hidden="true">Resuma em tópicos</button>
+          <button type="button" class="chip-btn" data-prompt="passo-a-passo" tabindex="-1" aria-hidden="true">Explique passo a passo</button>
+        </div>
+
+        <!-- Entrada de texto -->
+        <form id="chat-form" class="chat-form">
+          <label for="campo-mensagem" class="field-label">Sua pergunta</label>
+
+          <!-- Prévia da imagem anexada (some quando não há nenhuma) -->
+          <div id="image-preview" class="image-preview" hidden>
+            <img id="image-preview-thumb" class="image-preview__thumb" alt="">
+            <span id="image-preview-name" class="image-preview__name"></span>
+            <button type="button" id="btn-remover-imagem" class="image-preview__remove" aria-label="Remover imagem anexada">×</button>
+          </div>
+          <p id="image-error" class="field-error" role="alert" hidden></p>
+
+          <div class="chat-form__row">
+            <input type="file" id="campo-imagem" accept="image/png,image/jpeg,image/webp,image/heic,image/heif" capture="environment" class="visually-hidden">
+            <button type="button" id="btn-anexar-imagem" class="icon-btn icon-btn--attach" aria-label="Anexar uma foto (ex.: de um exercício) para o tutor ler">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M9 3a3 3 0 0 0-3 3v9a5 5 0 0 0 10 0V7a1 1 0 1 1 2 0v8a7 7 0 1 1-14 0V6a5 5 0 0 1 10 0v9a3 3 0 1 1-6 0V7a1 1 0 1 1 2 0v8a1 1 0 1 0 2 0V6a3 3 0 0 0-3-3z"/>
+              </svg>
+            </button>
+            <textarea
+              id="campo-mensagem"
+              class="text-input text-input--area"
+              rows="1"
+              placeholder="Digite sua pergunta aqui..."
+            ></textarea>
+            <button type="submit" id="btn-enviar" class="send-btn">
+              <span>Enviar</span>
+            </button>
+          </div>
+          <p class="chat-form__hint">Enter envia · Shift + Enter quebra a linha · Anexe uma foto para o tutor transcrever o texto nela</p>
+        </form>
+
+      </main>
+    </div>
+
+    <footer class="app-footer">
+      <p>As respostas são geradas por um assistente e podem conter erros. Confirme informações importantes com seu professor.</p>
+      <div class="app-footer__credit">
+        <span class="app-footer__author">Feito por <strong>Miguel Magal</strong></span>
+        <div class="app-footer__socials">
+          <a
+            href="https://www.linkedin.com/in/miguel-catelan-magalh%C3%A3es-a5079618a"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="app-footer__social-link"
+            aria-label="LinkedIn de Miguel Magal"
+            title="LinkedIn"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+              <path fill="currentColor" d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/>
+            </svg>
+          </a>
+          <a
+            href="https://github.com/project-0-null"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="app-footer__social-link"
+            aria-label="GitHub de Miguel Magal"
+            title="GitHub"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+              <path fill="currentColor" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script defer src="app.js?v=2"></script>
+</body>
+</html>

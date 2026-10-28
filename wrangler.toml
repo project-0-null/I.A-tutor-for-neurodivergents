@@ -1,6 +1,10 @@
 name = "tutor-educacional-inclusivo"
+main = "worker.js"
 compatibility_date = "2025-01-01"
-pages_build_output_dir = "."
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
 
 [vars]
 GEMINI_MODEL = "gemini-3.6-flash"
