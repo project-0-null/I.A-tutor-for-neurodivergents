@@ -148,6 +148,11 @@ class ChatRequest(BaseModel):
         max_length=150,
         description="Tema de interesse especial/hiperfoco do estudante para personalização de analogias (máx. 150 caracteres)."
     )
+    energy_level: Optional[str] = Field(
+        default="alta",
+        max_length=30,
+        description="Nível de energia atual do estudante ('alta', 'media', 'baixa', 'sobrecarregada')."
+    )
     history: Optional[List[ChatMessage]] = Field(
         default_factory=list,
         description="Histórico recente de mensagens para manter o contexto da conversa."
@@ -321,8 +326,13 @@ async def chat_endpoint(payload: ChatRequest):
     Recebe a dúvida do aluno, o tema de hiperfoco (opcional) e o histórico de mensagens.
     """
     try:
-        # --- Tratamento de Variável Dinâmica (Hiperfoco) ---
+        # --- Tratamento de Variáveis Dinâmicas (Hiperfoco e Energia) ---
         cleaned_hiperfoco = payload.hiperfoco.strip() if payload.hiperfoco else None
+        cleaned_energy = (
+            payload.energy_level.strip().lower()
+            if payload.energy_level and payload.energy_level.strip()
+            else "alta"
+        )
         
         # Inicia o texto apenas com a dúvida real do aluno
         user_text = payload.message.strip()
@@ -344,6 +354,18 @@ async def chat_endpoint(payload: ChatRequest):
         # Adiciona o hiperfoco no final, como uma instrução secundária, para não confundir a visão do modelo
         if cleaned_hiperfoco:
             user_text += f"\n\n[Instrução interna: o aluno tem hiperfoco em {cleaned_hiperfoco}. Use analogias com isso se for explicar algo.]"
+
+        if cleaned_energy == "baixa":
+            user_text += (
+                "\n\n[Instrução interna: o aluno está com energia baixa agora. "
+                "Use frases mais curtas, menor densidade de informação por frase e um tom extra paciente.]"
+            )
+        elif cleaned_energy == "sobrecarregada":
+            user_text += (
+                "\n\n[Instrução interna: o aluno está com a energia sobrecarregada agora. "
+                "Faça uma explicação ultra-enxuta: parágrafos de no máximo 2 frases curtas, "
+                "linguagem extremamente simples e acolhedora, apresentando apenas um conceito de cada vez.]"
+            )
 
         # --- Montagem e Limitação do Histórico de Conversa ---
         MAX_HISTORY_ITEMS = 6
@@ -396,6 +418,7 @@ async def chat_endpoint(payload: ChatRequest):
 
         logger.info(
             f"Processando requisição. Turnos válidos: {len(gemini_contents)} | "
+            f"Energia: {cleaned_energy} | "
             f"Hiperfoco: {'Sim (' + cleaned_hiperfoco + ')' if cleaned_hiperfoco else 'Não informado'} | "
             f"Imagem: {'Sim' if image_bytes is not None else 'Não'}"
         )

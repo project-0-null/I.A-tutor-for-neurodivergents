@@ -274,6 +274,14 @@ export async function onRequestPost(context) {
     return jsonError(422, "O campo hiperfoco excede o limite máximo de 150 caracteres.", request);
   }
 
+  const rawEnergyLevel =
+    typeof payload.energy_level === "string" && payload.energy_level.trim()
+      ? payload.energy_level.trim().toLowerCase()
+      : "alta";
+  if (rawEnergyLevel.length > 30) {
+    return jsonError(422, "O campo energy_level excede o limite máximo de 30 caracteres.", request);
+  }
+
   let validatedImage = null;
   if (payload.image_base64) {
     if (typeof payload.image_base64 !== "string" || payload.image_base64.length > 15 * 1024 * 1024) {
@@ -297,6 +305,14 @@ export async function onRequestPost(context) {
 
   if (rawHiperfoco) {
     userText += `\n\n[Instrução interna: o aluno tem hiperfoco em ${rawHiperfoco}. Use analogias com isso se for explicar algo.]`;
+  }
+
+  if (rawEnergyLevel === "baixa") {
+    userText +=
+      "\n\n[Instrução interna: o aluno está com energia baixa agora. Use frases mais curtas, menor densidade de informação por frase e um tom extra paciente.]";
+  } else if (rawEnergyLevel === "sobrecarregada") {
+    userText +=
+      "\n\n[Instrução interna: o aluno está com a energia sobrecarregada agora. Faça uma explicação ultra-enxuta: parágrafos de no máximo 2 frases curtas, linguagem extremamente simples e acolhedora, apresentando apenas um conceito de cada vez.]";
   }
 
   // Sanitização do histórico de conversa (máximo de 6 mensagens recentes)

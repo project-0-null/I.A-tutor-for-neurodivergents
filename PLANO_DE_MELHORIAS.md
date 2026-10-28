@@ -38,7 +38,7 @@ Para nunca arriscar o site principal que já está no ar na Cloudflare (`https:/
 
 ### Fase 1: Pedagogia e Acessibilidade Neurodivergente (TEA, TDAH, Dislexia)
 
-- [ ] **1.1. Conectar o "Medidor de Energia" (`energyLevel`) à IA e à Interface (`app.js`, `functions/api/chat.js`, `main.py`)**
+- [x] **1.1. Conectar o "Medidor de Energia" (`energyLevel`) à IA e à Interface (`app.js`, `functions/api/chat.js`, `main.py`)**
   - Enviar o campo `energy_level` (`"alta"`, `"media"`, `"baixa"`, `"sobrecarregada"`) no corpo do `POST /api/chat`.
   - No backend (`functions/api/chat.js` e `main.py`), adicionar instrução contextual conforme a energia:
     - `baixa`: frases mais curtas, menor densidade de informação por frase, tom extra paciente.

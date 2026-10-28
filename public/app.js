@@ -217,7 +217,7 @@
     dom.body.classList.toggle('simple-mode', prefs.simpleMode);
     dom.btnModoSimples.setAttribute('aria-pressed', String(prefs.simpleMode));
 
-    // Nível de energia (visual apenas — não é enviado à API)
+    // Nível de energia (enviado à API para ajustar a densidade da explicação)
     dom.energyButtons.forEach((btn) => {
       btn.setAttribute('aria-pressed', String(btn.dataset.level === prefs.energyLevel));
     });
@@ -290,12 +290,34 @@
       announce(prefs.simpleMode ? 'Modo simples ativado.' : 'Modo simples desativado.');
     });
 
+    const ENERGY_LABELS = {
+      alta: 'alta',
+      media: 'média',
+      baixa: 'baixa',
+      sobrecarregada: 'sobrecarregada',
+    };
+
     dom.energyButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         const level = btn.dataset.level;
         prefs.energyLevel = prefs.energyLevel === level ? null : level;
-        savePrefs();
-        applyPrefs();
+        if (prefs.energyLevel === 'sobrecarregada') {
+          prefs.simpleMode = true;
+          prefs.spacing = true;
+          prefs.reduceColor = true;
+          prefs.fontScaleIndex = Math.max(prefs.fontScaleIndex, 2);
+          savePrefs();
+          applyPrefs();
+          announce('Nível de energia: sobrecarregada. Modo simples ativado automaticamente para seu conforto.');
+        } else {
+          savePrefs();
+          applyPrefs();
+          if (prefs.energyLevel) {
+            announce(`Nível de energia: ${ENERGY_LABELS[prefs.energyLevel] || prefs.energyLevel}.`);
+          } else {
+            announce('Nível de energia desmarcado.');
+          }
+        }
       });
     });
 
@@ -857,6 +879,7 @@
     const payload = {
       message: effectiveText,
       hiperfoco: prefs.hiperfoco.trim() ? prefs.hiperfoco.trim() : null,
+      energy_level: prefs.energyLevel || 'alta',
       history: buildHistoryPayload(),
       image_base64: imageToSend ? imageToSend.base64 : null,
       image_mime_type: imageToSend ? imageToSend.mimeType : null,
