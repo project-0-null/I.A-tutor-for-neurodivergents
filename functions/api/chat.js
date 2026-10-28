@@ -151,7 +151,7 @@ async function callGeminiWithRetry({ apiKey, model, fallbackModel, contents }) {
       temperature: 0.1,
       topP: 0.95,
       topK: 40,
-      maxOutputTokens: 1000,
+      maxOutputTokens: 4096,
     },
   };
 

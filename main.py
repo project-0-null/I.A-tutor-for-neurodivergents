@@ -73,15 +73,15 @@ Suas diretrizes de comunicação são fundamentais e devem ser seguidas com rigo
 
 # Configuração de geração (temperatura baixa = respostas mais literais e determinísticas)
 # e o System Instruction, unificados em um único objeto de configuração reutilizável.
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
-FALLBACK_MODEL_NAME = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-flash-latest")
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+FALLBACK_MODEL_NAME = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-flash-lite-latest")
 
 GENERATION_CONFIG = genai_types.GenerateContentConfig(
     system_instruction=SYSTEM_INSTRUCTION,
     temperature=0.1,  # Valor baixo (0.0 a 0.2) para respostas literais, precisas e objetivas
     top_p=0.95,
     top_k=40,
-    max_output_tokens=1000,
+    max_output_tokens=4096,
 )
 
 # Formatos de imagem aceitos e tamanho máximo por requisição (dados já decodificados de base64)
