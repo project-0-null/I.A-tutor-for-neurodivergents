@@ -1,4 +1,4 @@
-name = "tutor-educacional-inclusivo"
+name = "i-a-tutor-for-neurodivergents"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 keep_vars = true
