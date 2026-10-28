@@ -22,6 +22,9 @@
       return customUrl.trim().replace(/\/+$/, '') + '/api/chat';
     }
     if (window.location.protocol.startsWith('http')) {
+      if (window.location.hostname.endsWith('.github.io')) {
+        return 'https://i-a-tutor-for-neurodivergents.miguelmagal0802.workers.dev/api/chat';
+      }
       if (
         window.location.port === '8000' ||
         window.location.port === '8788' ||
