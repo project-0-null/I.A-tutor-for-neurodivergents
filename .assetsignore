@@ -1,0 +1,24 @@
+# Arquivos que NUNCA devem ser publicados como assets estáticos no Cloudflare Pages
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+.git
+.gitignore
+.dockerignore
+.pytest_cache
+.wrangler
+__pycache__
+tesla
+tests
+functions
+*.py
+*.pyc
+requirements.txt
+Dockerfile
+docker-compose.yaml
+wrangler.toml
+*.md
+*.pdf
+*.docx
+*.log

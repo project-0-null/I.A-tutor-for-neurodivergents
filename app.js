@@ -24,7 +24,9 @@
     if (window.location.protocol.startsWith('http')) {
       if (
         window.location.port === '8000' ||
+        window.location.port === '8788' ||
         window.location.pathname.startsWith('/api') ||
+        window.location.hostname.endsWith('.pages.dev') ||
         window.location.hostname.endsWith('.ngrok-free.app') ||
         window.location.hostname.endsWith('.ngrok-free.dev') ||
         window.location.hostname.endsWith('.ngrok.io')

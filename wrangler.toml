@@ -1,0 +1,7 @@
+name = "tutor-educacional-inclusivo"
+compatibility_date = "2025-01-01"
+pages_build_output_dir = "."
+
+[vars]
+GEMINI_MODEL = "gemini-3.6-flash"
+GEMINI_FALLBACK_MODEL = "gemini-flash-latest"

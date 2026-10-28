@@ -8,6 +8,9 @@ env/
 .env
 .env.local
 .env.*.local
+.dev.vars
+.dev.vars.*
+.wrangler/
 
 # Python cache e compilação
 __pycache__/
