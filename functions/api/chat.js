@@ -126,9 +126,21 @@ function validateAndCleanImage(imageBase64, mimeType) {
 }
 
 async function callGeminiWithRetry({ apiKey, model, fallbackModel, contents }) {
-  let currentModel = model;
+  const candidateModels = Array.from(
+    new Set(
+      [
+        model,
+        fallbackModel,
+        "gemini-3.5-flash",
+        "gemini-flash-lite-latest",
+        "gemini-3.5-flash-lite",
+        "gemini-3.8-flash",
+      ].filter(Boolean)
+    )
+  );
+  let modelIndex = 0;
+  let currentModel = candidateModels[0];
   let attempt = 0;
-  let usedFallback = false;
 
   const requestBody = {
     systemInstruction: {
@@ -169,6 +181,13 @@ async function callGeminiWithRetry({ apiKey, model, fallbackModel, contents }) {
       errText = "";
     }
 
+    // Se a chave for inválida (401/403), não adianta trocar de modelo
+    if (statusCode === 401 || statusCode === 403) {
+      const authErr = new Error(errText || `HTTP ${statusCode}`);
+      authErr.statusCode = statusCode;
+      throw authErr;
+    }
+
     const lowerErr = errText.toLowerCase();
     const isNotFound =
       statusCode === 404 ||
@@ -176,9 +195,7 @@ async function callGeminiWithRetry({ apiKey, model, fallbackModel, contents }) {
       lowerErr.includes("not_found") ||
       lowerErr.includes("not found");
 
-    const canFallback = Boolean(
-      fallbackModel && !usedFallback && fallbackModel !== currentModel
-    );
+    const canFallback = modelIndex + 1 < candidateModels.length;
 
     if (
       canFallback &&
@@ -186,8 +203,8 @@ async function callGeminiWithRetry({ apiKey, model, fallbackModel, contents }) {
         [404, 500, 502, 503, 504].includes(statusCode) ||
         !RETRYABLE_STATUS_CODES.has(statusCode))
     ) {
-      currentModel = fallbackModel;
-      usedFallback = true;
+      modelIndex += 1;
+      currentModel = candidateModels[modelIndex];
       attempt = 0;
       continue;
     }
@@ -204,8 +221,8 @@ async function callGeminiWithRetry({ apiKey, model, fallbackModel, contents }) {
     }
 
     if (canFallback) {
-      currentModel = fallbackModel;
-      usedFallback = true;
+      modelIndex += 1;
+      currentModel = candidateModels[modelIndex];
       attempt = 0;
       continue;
     }
@@ -336,8 +353,8 @@ export async function onRequestPost(context) {
     geminiContents.shift();
   }
 
-  const modelName = env.GEMINI_MODEL || "gemini-3.6-flash";
-  const fallbackModelName = env.GEMINI_FALLBACK_MODEL || "gemini-flash-latest";
+  const modelName = env.GEMINI_MODEL || "gemini-3.5-flash";
+  const fallbackModelName = env.GEMINI_FALLBACK_MODEL || "gemini-flash-lite-latest";
 
   try {
     const geminiResponse = await callGeminiWithRetry({

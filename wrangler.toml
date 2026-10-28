@@ -10,5 +10,5 @@ directory = "./public"
 binding = "ASSETS"
 
 [vars]
-GEMINI_MODEL = "gemini-3.6-flash"
-GEMINI_FALLBACK_MODEL = "gemini-flash-latest"
+GEMINI_MODEL = "gemini-3.5-flash"
+GEMINI_FALLBACK_MODEL = "gemini-flash-lite-latest"
